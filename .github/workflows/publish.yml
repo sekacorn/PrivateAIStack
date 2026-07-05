@@ -45,4 +45,6 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d # v1.14.0
+      # NOTE: This is a Docker action; it pulls ghcr.io/pypa/gh-action-pypi-publish:<ref>.
+      # No image is tagged by commit SHA, so it must be pinned to a version tag, not a SHA.
+      - uses: pypa/gh-action-pypi-publish@v1.14.0
