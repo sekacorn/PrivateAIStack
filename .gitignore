@@ -13,6 +13,8 @@ htmlcov/
 .venv/
 .audit-venv/
 .audit-dev-venv/
+.package-test-venv/
+.package-sdist-venv/
 venv/
 ENV/
 env/
@@ -37,11 +39,13 @@ secrets.*
 reports/*
 !reports/.gitkeep
 !reports/v0.1-verification.md
+!reports/packaging-verification.md
 exports/
 backups/
 data/
 tmp/
 logs/
+package-test-deployment/
 audit/*.jsonl
 memory/*.jsonl
 

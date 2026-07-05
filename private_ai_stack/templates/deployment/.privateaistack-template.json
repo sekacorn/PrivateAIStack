@@ -1,0 +1,8 @@
+{
+  "template": "privateaistack-deployment",
+  "version": "0.1.0a1",
+  "default_model": "qwen2.5:3b",
+  "default_profile": "laptop-cpu",
+  "ollama_image": "ollama/ollama:0.31.1",
+  "observability_profile": "observability"
+}

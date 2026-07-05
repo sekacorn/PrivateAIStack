@@ -4,7 +4,7 @@
 
 PrivateAIStack is a local-first v0.1 foundation for running governed AI-agent workflows on infrastructure you control. It uses FastAPI, Forge from `agentforge-oss`, Ollama, PostgreSQL/pgvector, portable audit records, deterministic code-quality tools, and optional OpenTelemetry tracing.
 
-Status: demonstration-grade v0.1 implementation. Production hardening, security review, and organization-specific policy review are required before operational use.
+Status: alpha package candidate `0.1.0a1`. Production hardening, security review, and organization-specific policy review are required before operational use.
 
 ## What It Does
 
@@ -39,6 +39,28 @@ User or CI -> FastAPI -> Forge Orchestrator
 
 ## Five-Minute Quickstart
 
+Install the CLI from a local checkout or future PyPI alpha package:
+
+```bash
+python -m pip install -e ".[dev,postgres,observability]"
+privateaistack --version
+```
+
+Create a standalone deployment template:
+
+```bash
+privateaistack init ./privateaistack-deploy
+cd privateaistack-deploy
+privateaistack config check --directory .
+privateaistack up --directory .
+privateaistack model pull --directory . --model qwen2.5:3b
+privateaistack health --directory .
+```
+
+The packaged template includes `compose.yaml`, `.env.example`, OpenTelemetry Collector config, PostgreSQL initialization SQL, helper scripts, and local `audit/`, `reports/`, `exports/`, and `backups/` directories. Compose loads `.env.example` and optional `.env` overrides. `privateaistack init` refuses non-empty directories unless `--force` is used and never overwrites an existing `.env` file.
+
+Repository checkout workflow:
+
 ```bash
 git clone https://github.com/sekacorn/PrivateAIStack.git
 cd PrivateAIStack
@@ -63,6 +85,8 @@ Service URLs:
 
 ```bash
 docker compose --profile observability up --build -d
+# or
+privateaistack up --directory . --observability
 ```
 
 Core operation does not require observability. The application should keep working if the collector or Jaeger is unavailable.
@@ -73,6 +97,7 @@ Core operation does not require observability. The application should keep worki
 curl -sS http://127.0.0.1:8000/health
 curl -sS http://127.0.0.1:8000/ready
 curl -sS http://127.0.0.1:8000/version
+privateaistack doctor --directory .
 ```
 
 ## First Task
@@ -81,6 +106,7 @@ curl -sS http://127.0.0.1:8000/version
 curl -sS -X POST http://127.0.0.1:8000/v1/tasks \
   -H "content-type: application/json" \
   -d '{"goal":"Create a safe implementation plan for a local RAG feature."}'
+privateaistack task run --directory . "Create a safe implementation plan for a local RAG feature."
 ```
 
 ## Document Ingestion
@@ -89,6 +115,7 @@ curl -sS -X POST http://127.0.0.1:8000/v1/tasks \
 curl -sS -X POST http://127.0.0.1:8000/v1/knowledge/documents \
   -H "content-type: application/json" \
   -d '{"source_name":"mission.md","content":"PrivateAIStack stores local documents and audit records."}'
+privateaistack knowledge add --directory . --source-name mission.md --content "PrivateAIStack stores local documents and audit records."
 ```
 
 ## Knowledge Search
@@ -97,6 +124,7 @@ curl -sS -X POST http://127.0.0.1:8000/v1/knowledge/documents \
 curl -sS -X POST http://127.0.0.1:8000/v1/knowledge/search \
   -H "content-type: application/json" \
   -d '{"query":"audit records","limit":3}'
+privateaistack knowledge search --directory . "audit records" --limit 3
 ```
 
 ## Code Review
@@ -105,6 +133,7 @@ curl -sS -X POST http://127.0.0.1:8000/v1/knowledge/search \
 curl -sS -X POST http://127.0.0.1:8000/v1/reviews \
   -H "content-type: application/json" \
   -d '{"repository_path":"/app/sample-target","mode":"safe-static"}'
+privateaistack review --directory . /app/sample-target
 ```
 
 Then fetch a report:
@@ -132,6 +161,9 @@ make backup
 make restore RESTORE_FILE=backups/file.sql
 make export-memory
 make export-audit
+privateaistack backup --directory .
+privateaistack restore --directory . backups/file.sql
+privateaistack audit export --directory .
 ```
 
 Audit, report, and export output is bind-mounted into `audit/`, `reports/`, and `exports/` for local inspection. PostgreSQL and Ollama model storage use Docker named volumes. `docker compose down` preserves named volumes. `docker compose down -v` deletes PostgreSQL and Ollama model data.
@@ -141,6 +173,8 @@ Audit, report, and export output is bind-mounted into `audit/`, `reports/`, and 
 ```bash
 Get-Content audit/audit.jsonl -Tail 20
 make export-audit
+privateaistack audit show --directory . --lines 20
+privateaistack audit verify --directory .
 ```
 
 Audit records are JSONL with chained hashes and redacted sensitive fields. They are intended for local review and export, not as a substitute for organization-specific logging controls.

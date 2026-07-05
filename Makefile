@@ -1,4 +1,4 @@
-.PHONY: bootstrap model-pull up up-observability down logs health smoke test lint typecheck security quality code-review code-review-demo backup restore export-memory export-audit clean
+.PHONY: bootstrap model-pull up up-observability down logs health smoke test lint typecheck security quality build-package code-review code-review-demo backup restore export-memory export-audit clean
 
 bootstrap:
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
@@ -37,6 +37,10 @@ security:
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/security.ps1
 
 quality: lint typecheck test security
+
+build-package:
+	python -m build
+	python -m twine check dist/*
 
 code-review:
 	curl -sS -X POST http://127.0.0.1:8000/v1/reviews -H "content-type: application/json" -d '{"repository_path":"/workspace/target","mode":"safe-static"}'
