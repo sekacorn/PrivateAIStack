@@ -6,6 +6,7 @@ from private_ai_stack.reviews.findings import Finding
 
 
 def markdown_report(summary: dict[str, Any], findings: list[Finding]) -> str:
+    """Render the human-readable review report without adding unverified claims."""
     lines = [
         "# PrivateAIStack Code Review Report",
         "",
@@ -49,6 +50,7 @@ def json_report(summary: dict[str, Any], findings: list[Finding]) -> dict[str, A
 
 
 def sarif_report(findings: list[Finding]) -> dict[str, Any]:
+    """Emit a minimal SARIF document for file-specific findings."""
     return {
         "version": "2.1.0",
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",

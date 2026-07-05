@@ -8,6 +8,8 @@ from private_ai_stack.memory.models import DocumentChunk
 
 
 class MemoryStore:
+    """Stores document chunks in PostgreSQL when available, with an in-memory fallback for tests."""
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.embedding_model = DeterministicEmbeddingModel(settings.embedding_dimensions)
@@ -67,6 +69,7 @@ class MemoryStore:
         self._loaded = True
 
     def chunk_text(self, content: str, size: int = 1200, overlap: int = 120) -> list[str]:
+        """Split content into overlapping chunks so local search keeps nearby context together."""
         chunks: list[str] = []
         start = 0
         while start < len(content):
@@ -96,6 +99,7 @@ class MemoryStore:
             for index, chunk in enumerate(chunks)
         ]
 
+        # The in-memory branch keeps unit tests and local fallback mode free of PostgreSQL dependencies.
         if self._connection is None:
             existing = [chunk for chunk in self._chunks if chunk.document_id == document_id]
             if existing and not replace_existing:
@@ -137,6 +141,7 @@ class MemoryStore:
         await self._ensure_loaded()
         query_embedding = self.embedding_model.embed(query)
         chunks = await self._all_chunks()
+        # v0.1 favors deterministic, portable scoring over a production ANN index.
         scored = [(chunk, cosine_similarity(query_embedding, chunk.embedding)) for chunk in chunks]
         return sorted(scored, key=lambda item: item[1], reverse=True)[:limit]
 

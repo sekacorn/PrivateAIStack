@@ -13,6 +13,8 @@ from private_ai_stack.services.ollama_service import OllamaService
 
 
 class ForgeService:
+    """Runs plan tasks through Forge while preserving a local-only fallback path."""
+
     def __init__(self, settings: Settings, audit: AuditWriter, ollama: OllamaService) -> None:
         self.settings = settings
         self.audit = audit
@@ -20,6 +22,7 @@ class ForgeService:
         self.version = md.version("agentforge-oss")
 
     async def run_plan_task(self, goal: str, task_id: str, request_id: str, trace_id: str | None, actor: str) -> dict[str, Any]:
+        """Use Forge first, then fall back to direct Ollama without changing provider boundaries."""
         ready, reason = await self.ollama.ensure_model()
         if not ready:
             raise RuntimeError(reason)
@@ -40,6 +43,7 @@ class ForgeService:
         )
 
         async def _run_forge() -> dict[str, Any]:
+            # Fixed routing prevents Forge from selecting a hosted provider even if one is installed globally.
             config = ForgeConfig(
                 routing=RoutingConfig(
                     strategy="fixed",
@@ -57,6 +61,7 @@ class ForgeService:
             )
             provider = OllamaProvider(base_url=self.settings.ollama_base_url, timeout=self.settings.ollama_timeout_seconds)
             registry = ModelRegistry()
+            # Register the configured model explicitly so Forge sees the same local model as readiness checks.
             registry.register(
                 ModelInfo(
                     name=self.settings.ollama_model,

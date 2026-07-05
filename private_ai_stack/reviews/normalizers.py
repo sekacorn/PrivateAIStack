@@ -4,6 +4,7 @@ from private_ai_stack.reviews.findings import Finding, ToolRun, make_fingerprint
 
 
 def normalize_tool_runs(runs: list[ToolRun]) -> list[Finding]:
+    """Convert tool-specific output into one stable finding schema."""
     findings: list[Finding] = []
     for run in runs:
         if run.status == "not_run":
@@ -43,6 +44,7 @@ def normalize_tool_runs(runs: list[ToolRun]) -> list[Finding]:
 
 
 def deduplicate(findings: list[Finding]) -> list[Finding]:
+    """Keep the first finding for each fingerprint so reports stay stable across tools."""
     seen: set[str] = set()
     result: list[Finding] = []
     for finding in findings:
@@ -54,6 +56,7 @@ def deduplicate(findings: list[Finding]) -> list[Finding]:
 
 
 def _ruff(run: ToolRun) -> list[Finding]:
+    """Parse Ruff JSON output; unparseable output becomes a tooling finding."""
     try:
         payload = json.loads(run.stdout)
     except json.JSONDecodeError:
@@ -73,6 +76,7 @@ def _ruff(run: ToolRun) -> list[Finding]:
 
 
 def _bandit(run: ToolRun) -> list[Finding]:
+    """Parse Bandit JSON output into normalized security findings."""
     try:
         payload = json.loads(run.stdout)
     except json.JSONDecodeError:
