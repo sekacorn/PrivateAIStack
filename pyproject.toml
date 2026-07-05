@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "private-ai-stack"
+version = "0.1.0"
+description = "Local-first AI agents, persistent RAG, governed code review, auditability, and optional observability."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Sekacorn", email = "sekacorn@aol.com" }]
+maintainers = [{ name = "Sekacorn", email = "Sekacorn@gmail.com" }]
+dependencies = [
+  "agentforge-oss[pgvector,otel]>=0.5.0,<0.6.0",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.4",
+  "httpx>=0.27",
+  "psycopg[binary]>=3.2",
+  "opentelemetry-api>=1.26",
+  "opentelemetry-sdk>=1.26",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "bandit>=1.7",
+  "pip-audit>=2.7",
+  "radon>=6.0",
+  "detect-secrets>=1.5",
+  "yamllint>=1.35",
+]
+
+[project.scripts]
+private-ai-stack = "private_ai_stack.api.app:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["private_ai_stack"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+exclude = ["sample-target", ".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["B008", "S101", "S603", "S607"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+exclude = ["tests/fixtures", "sample-target"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=private_ai_stack --cov-report=term-missing --cov-report=xml"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["private_ai_stack"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

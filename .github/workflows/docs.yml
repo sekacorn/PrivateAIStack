@@ -1,0 +1,17 @@
+name: Documentation
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: test -f README.md
+      - run: grep -R "qwen2.5:3b" README.md .env.example docs
