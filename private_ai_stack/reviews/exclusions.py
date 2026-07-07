@@ -29,6 +29,8 @@ def is_excluded(path: Path, root: Path, max_bytes: int) -> tuple[bool, str | Non
         rel = path.relative_to(root)
     except ValueError:
         return True, "outside_root"
+    if path.is_symlink():
+        return True, "symlink"
     lowered_parts = {part.lower() for part in rel.parts}
     if lowered_parts & DEFAULT_EXCLUDED_PARTS:
         return True, "excluded_path"

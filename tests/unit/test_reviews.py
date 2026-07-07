@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from private_ai_stack.reviews.collector import collect_repository
 from private_ai_stack.reviews.findings import ToolRun
 from private_ai_stack.reviews.normalizers import normalize_tool_runs
@@ -14,6 +16,21 @@ def test_collect_repository_excludes_secret_paths(tmp_path: Path) -> None:
 
     assert [file.relative_path for file in snapshot.files] == ["app.py"]
     assert ".env" in snapshot.excluded
+
+
+def test_collect_repository_excludes_symlinks(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside-secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    link = tmp_path / "linked-secret.txt"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not available in this environment")
+
+    snapshot = collect_repository(str(tmp_path), 250_000)
+
+    assert "linked-secret.txt" not in [file.relative_path for file in snapshot.files]
+    assert snapshot.excluded["linked-secret.txt"] == "symlink"
 
 
 def test_normalize_unavailable_tool() -> None:

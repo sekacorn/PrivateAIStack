@@ -6,6 +6,7 @@ import shutil
 import socket
 import subprocess  # nosec B404
 import sys
+from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.resources import as_file, files
@@ -112,6 +113,33 @@ def run_command(args: list[str], cwd: Path | None = None, timeout: int | None = 
     return CommandResult(args=args, returncode=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
 
 
+def stream_command(args: list[str], cwd: Path | None = None) -> CommandResult:
+    try:
+        completed = subprocess.run(args, cwd=cwd, timeout=None, check=False)  # nosec B603
+    except FileNotFoundError as exc:
+        raise CliError(f"Required command is unavailable: {args[0]}", DEPENDENCY_UNAVAILABLE) from exc
+    return CommandResult(args=args, returncode=completed.returncode, stdout="", stderr="")
+
+
+def run_command_with_file_stdin(args: list[str], input_path: Path, cwd: Path | None = None, timeout: int | None = 120) -> CommandResult:
+    try:
+        with input_path.open("r", encoding="utf-8") as handle:
+            completed = subprocess.run(  # nosec B603
+                args,
+                cwd=cwd,
+                stdin=handle,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+    except FileNotFoundError as exc:
+        raise CliError(f"Required command is unavailable: {args[0]}", DEPENDENCY_UNAVAILABLE) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise CliError(f"Command timed out: {' '.join(args)}", RUNTIME_FAILURE) from exc
+    return CommandResult(args=args, returncode=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
+
+
 def compose_args(directory: Path, *args: str, observability: bool = False) -> list[str]:
     command = ["docker", "compose", "-f", str(compose_file(directory))]
     if observability:
@@ -127,10 +155,7 @@ def echo_result(result: CommandResult) -> None:
         typer.echo(result.stderr.rstrip(), err=True)
 
 
-def read_env(directory: Path) -> dict[str, str]:
-    env_path = ensure_directory(directory) / ".env"
-    if not env_path.exists():
-        env_path = ensure_directory(directory) / ".env.example"
+def read_env_file(env_path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not env_path.exists():
         return values
@@ -140,6 +165,13 @@ def read_env(directory: Path) -> dict[str, str]:
             continue
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def read_env(directory: Path) -> dict[str, str]:
+    root = ensure_directory(directory)
+    values = read_env_file(root / ".env.example")
+    values.update(read_env_file(root / ".env"))
     return values
 
 
@@ -282,7 +314,7 @@ def logs(
     directory: Annotated[Path, typer.Option("--directory", "-d", help="Deployment directory.")] = Path("."),
     service: Annotated[str | None, typer.Option("--service", "-s", help="Optional Compose service name.")] = None,
     follow: Annotated[bool, typer.Option("--follow", "-f", help="Follow logs.")] = False,
-    tail: Annotated[int, typer.Option("--tail", help="Number of log lines to show.")] = 100,
+    tail: Annotated[int, typer.Option("--tail", help="Number of log lines to show.", min=1)] = 100,
     verbose: Annotated[bool, typer.Option("--verbose", help="Show raw exceptions.")] = False,
 ) -> None:
     try:
@@ -292,7 +324,7 @@ def logs(
             args.append("-f")
         if service:
             args.append(service)
-        result = run_command(compose_args(root, *args), cwd=root, timeout=None if follow else 120)
+        result = stream_command(compose_args(root, *args), cwd=root) if follow else run_command(compose_args(root, *args), cwd=root)
         echo_result(result)
         if result.returncode != 0:
             raise CliError("Could not read Docker Compose logs.", RUNTIME_FAILURE)
@@ -329,7 +361,13 @@ def doctor(
             rows.append(
                 ("compose config", "ok" if config.returncode == 0 else "fail", "valid" if config.returncode == 0 else config.stderr.strip())
             )
-        for name, port in (("api port", 8000), ("ollama port", 11434), ("postgres port", 5432)):
+        values = read_env(root)
+        port_checks = (
+            ("api port", int(values.get("API_PORT", "8000"))),
+            ("ollama port", 11434),
+            ("postgres port", 5432),
+        )
+        for name, port in port_checks:
             rows.append((name, "info", "open" if port_is_open("127.0.0.1", port) else "closed"))
         width = max(len(name) for name, _, _ in rows)
         for name, state, detail in rows:
@@ -436,7 +474,7 @@ def knowledge_add(
 @knowledge_app.command("search")
 def knowledge_search(
     query: Annotated[str, typer.Argument(help="Search query.")],
-    limit: Annotated[int, typer.Option("--limit", help="Maximum hits.")] = 5,
+    limit: Annotated[int, typer.Option("--limit", help="Maximum hits.", min=1, max=20)] = 5,
     directory: Annotated[Path, typer.Option("--directory", "-d", help="Deployment directory.")] = Path("."),
     api_base_url: Annotated[str | None, typer.Option("--api-url", help="Override API URL.")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", help="Show raw exceptions.")] = False,
@@ -469,13 +507,17 @@ def review(
 @audit_app.command("show")
 def audit_show(
     directory: Annotated[Path, typer.Option("--directory", "-d", help="Deployment directory.")] = Path("."),
-    lines: Annotated[int, typer.Option("--lines", "-n", help="Number of audit records to show.")] = 20,
+    lines: Annotated[int, typer.Option("--lines", "-n", help="Number of audit records to show.", min=0)] = 20,
 ) -> None:
     path = ensure_directory(directory) / "audit" / "audit.jsonl"
     if not path.exists():
         fail(f"No audit log found at {path}", INVALID_INPUT)
-    records = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    for line in records[-lines:]:
+    records: deque[str] = deque(maxlen=lines)
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                records.append(line.rstrip())
+    for line in records:
         typer.echo(line)
 
 
@@ -501,20 +543,21 @@ def audit_verify(directory: Annotated[Path, typer.Option("--directory", "-d", he
         fail(f"No audit log found at {path}", INVALID_INPUT)
     previous: str | None = None
     count = 0
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        record = json.loads(line)
-        if record.get("previous_hash") != previous:
-            fail(f"Audit hash chain mismatch on line {line_number}.", RUNTIME_FAILURE)
-        expected = record.get("record_hash")
-        payload = dict(record)
-        payload.pop("record_hash", None)
-        actual = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-        if actual != expected:
-            fail(f"Audit record hash mismatch on line {line_number}.", RUNTIME_FAILURE)
-        previous = actual
-        count += 1
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if record.get("previous_hash") != previous:
+                fail(f"Audit hash chain mismatch on line {line_number}.", RUNTIME_FAILURE)
+            expected = record.get("record_hash")
+            payload = dict(record)
+            payload.pop("record_hash", None)
+            actual = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+            if actual != expected:
+                fail(f"Audit record hash mismatch on line {line_number}.", RUNTIME_FAILURE)
+            previous = actual
+            count += 1
     typer.echo(f"Audit chain OK ({count} records)")
 
 
@@ -551,11 +594,11 @@ def restore(
         source = backup_file.expanduser().resolve()
         if not source.exists():
             raise CliError(f"Backup file not found: {source}", INVALID_INPUT)
-        ps = run_command(
+        ps = run_command_with_file_stdin(
             compose_args(root, "exec", "-T", "postgres", "psql", "-U", "private_ai_stack", "private_ai_stack"),
+            source,
             cwd=root,
             timeout=600,
-            stdin=source.read_text(encoding="utf-8"),
         )
         if ps.returncode != 0:
             echo_result(ps)

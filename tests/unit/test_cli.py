@@ -139,6 +139,23 @@ def test_compose_management_commands(tmp_path, monkeypatch) -> None:
     ] in seen_args
 
 
+def test_logs_follow_streams_without_capture(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "deployment"
+    runner.invoke(cli.app, ["init", str(target)])
+    seen_args: list[list[str]] = []
+
+    def fake_stream(args: list[str], cwd=None):  # noqa: ANN001
+        seen_args.append(args)
+        return cli.CommandResult(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli, "stream_command", fake_stream)
+
+    result = runner.invoke(cli.app, ["logs", "--directory", str(target), "--follow", "--service", "api"])
+
+    assert result.exit_code == 0
+    assert seen_args == [["docker", "compose", "-f", str(target.resolve() / "compose.yaml"), "logs", "--tail", "100", "-f", "api"]]
+
+
 def test_doctor_reports_degraded_without_env(tmp_path, monkeypatch) -> None:
     target = tmp_path / "deployment"
     runner.invoke(cli.app, ["init", str(target)])
@@ -153,13 +170,20 @@ def test_doctor_reports_degraded_without_env(tmp_path, monkeypatch) -> None:
         return cli.CommandResult(args=args, returncode=0, stdout="services: {}\n", stderr="")
 
     monkeypatch.setattr(cli, "run_command", fake_run)
-    monkeypatch.setattr(cli, "port_is_open", lambda host, port: False)
+    checked_ports: list[int] = []
+
+    def fake_port_is_open(host: str, port: int) -> bool:
+        checked_ports.append(port)
+        return False
+
+    monkeypatch.setattr(cli, "port_is_open", fake_port_is_open)
 
     result = runner.invoke(cli.app, ["doctor", "--directory", str(target)])
 
     assert result.exit_code == cli.DEGRADED
     assert "docker cli" in result.stdout
     assert "using .env.example/defaults" in result.stdout
+    assert 8000 in checked_ports
 
 
 def test_health_ready_success(monkeypatch, tmp_path) -> None:
@@ -232,9 +256,11 @@ def test_config_check_reports_missing_files(tmp_path) -> None:
 
 
 def test_env_helpers_use_directory_env(tmp_path) -> None:
+    (tmp_path / ".env.example").write_text("API_HOST=127.0.0.1\nAPI_PORT=8000\nAPI_KEY=\nDEFAULT_PROFILE=laptop-cpu\n", encoding="utf-8")
     (tmp_path / ".env").write_text("API_HOST=127.0.0.2\nAPI_PORT=9000\nAPI_KEY=secret\n", encoding="utf-8")
 
     assert cli.read_env(tmp_path)["API_KEY"] == "secret"
+    assert cli.read_env(tmp_path)["DEFAULT_PROFILE"] == "laptop-cpu"
     assert cli.api_url(tmp_path, None) == "http://127.0.0.2:9000"
     assert cli.api_headers(tmp_path) == {"x-api-key": "secret"}
     assert cli.api_url(tmp_path, "http://localhost:8080/") == "http://localhost:8080"
@@ -302,14 +328,18 @@ def test_backup_and_restore(tmp_path, monkeypatch) -> None:
     runner.invoke(cli.app, ["init", str(target)])
     backup_file = tmp_path / "backup.sql"
     backup_file.write_text("select 1;\n", encoding="utf-8")
-    seen_stdin: list[str | None] = []
+    seen_restore_file: list[str] = []
 
     def fake_run(args: list[str], cwd=None, timeout=120, stdin=None):  # noqa: ANN001
-        seen_stdin.append(stdin)
         stdout = "dump\n" if "pg_dump" in args else ""
         return cli.CommandResult(args=args, returncode=0, stdout=stdout, stderr="")
 
+    def fake_run_with_file(args: list[str], input_path, cwd=None, timeout=120):  # noqa: ANN001
+        seen_restore_file.append(input_path.read_text(encoding="utf-8"))
+        return cli.CommandResult(args=args, returncode=0, stdout="", stderr="")
+
     monkeypatch.setattr(cli, "run_command", fake_run)
+    monkeypatch.setattr(cli, "run_command_with_file_stdin", fake_run_with_file)
 
     backup = runner.invoke(cli.app, ["backup", "--directory", str(target), "--output", str(tmp_path / "dump.sql")])
     restore = runner.invoke(cli.app, ["restore", str(backup_file), "--directory", str(target)])
@@ -317,7 +347,7 @@ def test_backup_and_restore(tmp_path, monkeypatch) -> None:
     assert backup.exit_code == 0
     assert (tmp_path / "dump.sql").read_text(encoding="utf-8") == "dump\n"
     assert restore.exit_code == 0
-    assert "select 1;\n" in seen_stdin
+    assert seen_restore_file == ["select 1;\n"]
 
 
 def test_audit_verify_detects_valid_chain(tmp_path) -> None:
