@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "privateaistack"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Local-first AI agents, persistent RAG, governed code review, auditability, and optional observability."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "Cornelius Sekamatte" }]
-maintainers = [{ name = "Cornelius Sekamatte" }]
+authors = [{ name = "sekacorn" }]
+maintainers = [{ name = "sekacorn" }]
 keywords = ["ai", "agents", "ollama", "rag", "audit", "devsecops", "local-first"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -31,7 +31,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "agentforge-oss>=0.5.0,<0.6.0",
+  "agentforge-oss>=0.5.1,<0.6.0",
   "fastapi>=0.115",
   "pydantic>=2.9",
   "pydantic-settings>=2.4",
@@ -42,18 +42,18 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/sekacorn/PrivateAIStack"
-Repository = "https://github.com/sekacorn/PrivateAIStack.git"
+Repository = "https://github.com/sekacorn/PrivateAIStack"
 Issues = "https://github.com/sekacorn/PrivateAIStack/issues"
 Changelog = "https://github.com/sekacorn/PrivateAIStack/blob/master/CHANGELOG.md"
 Documentation = "https://github.com/sekacorn/PrivateAIStack/tree/master/docs"
 
 [project.optional-dependencies]
 postgres = [
-  "agentforge-oss[pgvector]>=0.5.0,<0.6.0",
+  "agentforge-oss[pgvector]>=0.5.1,<0.6.0",
   "psycopg[binary]>=3.2",
 ]
 observability = [
-  "agentforge-oss[otel]>=0.5.0,<0.6.0",
+  "agentforge-oss[otel]>=0.5.1,<0.6.0",
   "opentelemetry-api>=1.26",
   "opentelemetry-sdk>=1.26",
   "opentelemetry-exporter-otlp-proto-grpc>=1.26",
@@ -78,7 +78,7 @@ quality = [
   "yamllint>=1.35",
 ]
 all = [
-  "agentforge-oss[pgvector,otel]>=0.5.0,<0.6.0",
+  "agentforge-oss[pgvector,otel]>=0.5.1,<0.6.0",
   "psycopg[binary]>=3.2",
   "opentelemetry-api>=1.26",
   "opentelemetry-sdk>=1.26",
@@ -108,6 +108,7 @@ exclude = [
   ".audit-venv/**",
   ".audit-dev-venv/**",
   ".mypy_cache/**",
+  ".venv-release/**",
   ".package-sdist-venv/**",
   ".package-test-venv/**",
   ".pytest_cache/**",
@@ -167,6 +168,7 @@ exclude = [
   ".audit-venv/**",
   ".audit-dev-venv/**",
   ".mypy_cache/**",
+  ".venv-release/**",
   ".package-sdist-venv/**",
   ".package-test-venv/**",
   ".pytest_cache/**",

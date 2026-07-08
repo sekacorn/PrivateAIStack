@@ -1,34 +1,28 @@
 # PyPI Release
 
-The preferred distribution name is `privateaistack`. It was checked against PyPI's JSON API during packaging work and appeared available then, but the name is not reserved until an upload succeeds.
+The distribution name is `privateaistack`; it already exists on PyPI and must be published through the existing project.
 
-Do not publish from routine development or CI. CI builds artifacts and checks metadata only.
+Do not publish from routine development or CI. CI builds artifacts and checks metadata only. Release publication uses GitHub Actions with PyPI Trusted Publishing.
 
-## Manual TestPyPI Upload
+## Trusted Publishing Setup
 
-```bash
-python -m pip install --upgrade build twine
-Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
-python -m build
-python -m twine check dist/*
-python -m twine upload --repository testpypi dist/*
-```
+In GitHub, create or verify an environment named exactly `pypi`.
 
-Then test in a clean environment:
+In PyPI, open the existing `privateaistack` project and configure a GitHub Actions Trusted Publisher:
 
-```bash
-python -m venv .testpypi-venv
-.testpypi-venv/Scripts/python -m pip install --upgrade pip
-.testpypi-venv/Scripts/python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ privateaistack==0.1.0a1
-.testpypi-venv/Scripts/privateaistack --version
-```
+- PyPI project: `privateaistack`
+- GitHub owner: `sekacorn`
+- GitHub repository: `PrivateAIStack`
+- Workflow filename: `release.yml`
+- Environment: `pypi`
 
-## Manual PyPI Upload
+Do not add a PyPI API token secret.
 
-Publish only after TestPyPI install, local quality checks, and artifact inspection pass:
+## Release
 
 ```bash
-python -m twine upload dist/*
+git tag -a v0.1.0a2 -m "privateaistack 0.1.0a2"
+git push origin v0.1.0a2
 ```
 
-Use a scoped PyPI token or trusted publishing. Do not place tokens in `.env`, shell history, the repository, or CI logs.
+Only tag after local checks, artifact inspection, clean wheel and source-distribution installs, Compose validation, pushed CI, GitHub environment setup, and PyPI Trusted Publisher configuration are complete.

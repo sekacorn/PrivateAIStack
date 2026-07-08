@@ -4,7 +4,7 @@
 
 PrivateAIStack is a local-first v0.1 foundation for running governed AI-agent workflows on infrastructure you control. It uses FastAPI, Forge from `agentforge-oss`, Ollama, PostgreSQL/pgvector, portable audit records, deterministic code-quality tools, and optional OpenTelemetry tracing.
 
-Status: alpha package candidate `0.1.0a1`. Production hardening, security review, and organization-specific policy review are required before operational use.
+Status: alpha package `0.1.0a2`. Production hardening, security review, and organization-specific policy review are required before operational use.
 
 ## What It Does
 
@@ -39,7 +39,26 @@ User or CI -> FastAPI -> Forge Orchestrator
 
 ## Five-Minute Quickstart
 
-Install the CLI from a local checkout or future PyPI alpha package:
+Install the published alpha package:
+
+```bash
+python -m pip install "privateaistack==0.1.0a2"
+privateaistack --version
+```
+
+General installation can use the latest published version:
+
+```bash
+python -m pip install privateaistack
+```
+
+Package identity:
+
+- PyPI distribution: `privateaistack`
+- Python import package: `private_ai_stack`
+- CLI command: `privateaistack`
+
+For development from a local checkout:
 
 ```bash
 python -m pip install -e ".[dev,postgres,observability]"

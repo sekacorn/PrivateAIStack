@@ -2,7 +2,7 @@
 
 PrivateAIStack publishes as the Python distribution `privateaistack`.
 
-Current alpha version: `0.1.0a1`.
+Current alpha version: `0.1.0a2`.
 
 The package contains:
 
@@ -24,8 +24,8 @@ python -m twine check dist/*
 ## Inspect Contents
 
 ```bash
-python -m zipfile -l dist/privateaistack-0.1.0a1-py3-none-any.whl
-tar -tf dist/privateaistack-0.1.0a1.tar.gz
+python -m zipfile -l dist/privateaistack-0.1.0a2-py3-none-any.whl
+tar -tf dist/privateaistack-0.1.0a2.tar.gz
 ```
 
 Check that template files are present and local runtime artifacts are absent.
@@ -35,7 +35,7 @@ Check that template files are present and local runtime artifacts are absent.
 ```bash
 python -m venv .package-test-venv
 .package-test-venv/Scripts/python -m pip install --upgrade pip
-.package-test-venv/Scripts/python -m pip install dist/privateaistack-0.1.0a1-py3-none-any.whl
+.package-test-venv/Scripts/python -m pip install dist/privateaistack-0.1.0a2-py3-none-any.whl
 .package-test-venv/Scripts/privateaistack --version
 .package-test-venv/Scripts/privateaistack init package-test-deployment
 .package-test-venv/Scripts/privateaistack config check --directory package-test-deployment

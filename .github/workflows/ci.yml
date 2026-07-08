@@ -23,5 +23,6 @@ jobs:
       # postgres + observability provide psycopg / opentelemetry so mypy can resolve their imports.
       - run: python -m pip install -e ".[dev,postgres,observability]"
       - run: python -m ruff check .
+      - run: python -m ruff format --check .
       - run: python -m mypy private_ai_stack
-      - run: python -m pytest
+      - run: python -m pytest --cov=private_ai_stack --cov-branch --cov-report=term-missing

@@ -53,11 +53,11 @@ Status: locked.
 ## Phase 2 Entry Criteria
 
 - Phase 1 docs exist.
-- Forge 0.5.0 integration assumptions are documented.
+- Forge 0.5.1-compatible integration assumptions are documented.
 - Runtime defaults are locked.
 - Trust boundaries are documented.
 - No unresolved decision blocks minimal stack implementation.
 
 ## Verified Implementation Adjustment
 
-Forge 0.5.0 exposes the expected orchestration APIs, but runtime task execution requires awaiting `Orchestrator.run` when it returns an awaitable. PrivateAIStack also registers `qwen2.5:3b` in Forge's `ModelRegistry` and uses fixed routing to the Ollama provider so local tasks do not silently route to hosted providers.
+Forge exposes the expected orchestration APIs, but runtime task execution requires awaiting `Orchestrator.run` when it returns an awaitable. PrivateAIStack also registers `qwen2.5:3b` in Forge's `ModelRegistry` and uses fixed routing to the Ollama provider so local tasks do not silently route to hosted providers.

@@ -118,7 +118,7 @@ Agents own:
 The minimum supported Forge package for v0.1 is expected to be:
 
 ```text
-agentforge-oss>=0.5.0,<0.6.0
+agentforge-oss>=0.5.1,<0.6.0
 ```
 
 Verified import:
@@ -127,7 +127,7 @@ Verified import:
 import forge
 ```
 
-Verified local Forge 0.5.0 exports include:
+Verified local Forge 0.5.1-compatible exports include:
 
 - `Orchestrator`
 - `Agent`
@@ -142,7 +142,7 @@ Verified local Forge 0.5.0 exports include:
 - `AuditLogger`
 - `EventBus`
 
-Implementation note: Forge 0.5.0 `Orchestrator.run` may return an awaitable at runtime. PrivateAIStack awaits that result and explicitly registers the configured Ollama model in a `ModelRegistry` with fixed routing to avoid accidental hosted-provider fallback.
+Implementation note: Forge `Orchestrator.run` may return an awaitable at runtime. PrivateAIStack awaits that result and explicitly registers the configured Ollama model in a `ModelRegistry` with fixed routing to avoid accidental hosted-provider fallback.
 
 Integration points requiring implementation-time verification:
 
