@@ -4,11 +4,11 @@ PrivateAIStack is a local-first, provider-replaceable AI stack for governed agen
 
 Status: Phase 1 design baseline.
 
-Author: Sekacorn
+Author: sekacorn
 
-Project contact: Sekacorn@gmail.com
+Project contact: Open a GitHub repository issue for general project questions.
 
-GitHub email: sekacorn@aol.com
+Security contact: Use GitHub Security Advisories if enabled, or contact the maintainer through the repository without posting sensitive details publicly.
 
 ## V0.1 Decisions
 

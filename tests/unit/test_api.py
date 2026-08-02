@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 from private_ai_stack.api.app import create_app
 from private_ai_stack.config.settings import get_settings
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -35,7 +37,10 @@ def test_knowledge_ingest_and_search(client: TestClient) -> None:
 
 
 def test_review_sample_target(client: TestClient) -> None:
-    response = client.post("/v1/reviews", json={"repository_path": "sample-target", "mode": "safe-static"})
+    response = client.post(
+        "/v1/reviews",
+        json={"repository_path": str(PROJECT_ROOT / "sample-target"), "mode": "safe-static"},
+    )
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "succeeded"

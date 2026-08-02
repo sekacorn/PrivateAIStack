@@ -1,6 +1,6 @@
 # Security Policy
 
-Report security concerns privately to Sekacorn@gmail.com.
+Use GitHub Security Advisories if enabled, or contact the maintainer through the repository before sharing sensitive vulnerability details.
 
 Do not open public issues for suspected vulnerabilities that include exploit details, credentials, private code, or sensitive operational information.
 
