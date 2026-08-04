@@ -1,12 +1,12 @@
 # Dependency Licenses
 
-PrivateAIStack original code is MIT licensed. Dependencies retain their own licenses.
+PrivateAIStack original code is Apache-2.0 licensed. Dependencies retain their own licenses.
 
 Initial inventory:
 
 | Dependency | Purpose | License notes |
 | --- | --- | --- |
-| agentforge-oss | Forge orchestration and governance | MIT according to PyPI metadata inspected during Phase 1 |
+| agentforge-oss | Forge orchestration and governance | Apache-2.0 in the current source tree; verify published package metadata before release |
 | FastAPI | API framework | Check installed package metadata before release |
 | Pydantic | Validation | Check installed package metadata before release |
 | Uvicorn | ASGI server | Check installed package metadata before release |

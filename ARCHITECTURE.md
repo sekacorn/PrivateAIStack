@@ -13,7 +13,7 @@ Security contact: Use GitHub Security Advisories if enabled, or contact the main
 ## V0.1 Decisions
 
 - Repository: https://github.com/sekacorn/PrivateAIStack.git
-- Original repository code license: MIT
+- Original repository code license: Apache-2.0
 - Default laptop model: `qwen2.5:3b`
 - Default runtime profile: `laptop-cpu`
 - Default Forge worker count: `1`

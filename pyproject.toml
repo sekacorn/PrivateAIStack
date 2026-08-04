@@ -8,7 +8,7 @@ version = "0.1.0a2"
 description = "Local-first AI agents, persistent RAG, governed code review, auditability, and optional observability."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "Apache-2.0"
 authors = [{ name = "sekacorn" }]
 maintainers = [{ name = "sekacorn" }]
 keywords = ["ai", "agents", "ollama", "rag", "audit", "devsecops", "local-first"]
@@ -18,7 +18,7 @@ classifiers = [
   "Framework :: FastAPI",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
-  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",

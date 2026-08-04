@@ -235,4 +235,4 @@ For external Ollama, point `OLLAMA_BASE_URL` to your private endpoint. Hosted pr
 
 ## License
 
-Original repository code is MIT licensed. Third-party dependencies have their own licenses; see `docs/dependency-licenses.md`.
+Original repository code is Apache-2.0 licensed. Third-party dependencies have their own licenses; see `docs/dependency-licenses.md`.
