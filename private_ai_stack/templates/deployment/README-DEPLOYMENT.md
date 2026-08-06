@@ -25,4 +25,4 @@ The default laptop model is `qwen2.5:3b`. Larger models are optional and are nev
 
 The Compose file loads `.env.example` and then optional `.env` overrides. Copy `.env.example` to `.env` only when you need local overrides. Do not put production secrets in this template directory.
 
-The API Dockerfile installs `privateaistack[postgres,observability]==0.1.0a2`. Override `PRIVATEAISTACK_SPEC` during Docker build if you need to test a local wheel or a different released version.
+The API Dockerfile installs `privateaistack[postgres,observability]==0.1.0a3`. Override `PRIVATEAISTACK_SPEC` during Docker build if you need to test a local wheel or a different released version.

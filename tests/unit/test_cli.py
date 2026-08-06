@@ -15,7 +15,7 @@ def test_cli_version() -> None:
     result = runner.invoke(cli.app, ["--version"])
 
     assert result.exit_code == 0
-    assert "privateaistack 0.1.0a2" in result.stdout
+    assert "privateaistack 0.1.0a3" in result.stdout
 
 
 def test_deployment_template_is_packaged() -> None:

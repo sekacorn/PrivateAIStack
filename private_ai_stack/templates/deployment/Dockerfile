@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-ARG PRIVATEAISTACK_SPEC="privateaistack[postgres,observability]==0.1.0a2"
+ARG PRIVATEAISTACK_SPEC="privateaistack[postgres,observability]==0.1.0a3"
 
 RUN addgroup --system app && adduser --system --ingroup app app
 WORKDIR /app

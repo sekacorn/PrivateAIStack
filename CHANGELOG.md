@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0a3 - 2026-08-06
+
+- Publish corrected Apache-2.0 package metadata under the public maintainer identity `sekacorn`.
+- Preserve the existing local-first runtime and documented deployment templates without claiming new integrations.
+
 ## 0.1.0a2
 
 ### Release infrastructure
