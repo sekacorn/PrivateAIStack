@@ -1,11 +1,12 @@
 import hashlib
+import importlib
 import json
 import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from private_ai_stack.audit.models import AuditRecord
 from private_ai_stack.audit.redaction import redact
@@ -48,18 +49,16 @@ class AuditWriter:
     def _lock_file(handle: Any) -> None:
         try:
             if os.name == "nt":
-                import msvcrt
-
                 handle.seek(0)
                 if not handle.read(1):
                     handle.write(b"0")
                     handle.flush()
                 handle.seek(0)
+                msvcrt = cast(Any, importlib.import_module("msvcrt"))
                 msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
             else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)  # type: ignore[attr-defined]
+                fcntl = cast(Any, importlib.import_module("fcntl"))
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         except OSError as exc:
             raise AuditIntegrityError("Unable to acquire the local audit lock.") from exc
 
@@ -67,14 +66,12 @@ class AuditWriter:
     def _unlock_file(handle: Any) -> None:
         try:
             if os.name == "nt":
-                import msvcrt
-
                 handle.seek(0)
+                msvcrt = cast(Any, importlib.import_module("msvcrt"))
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
+                fcntl = cast(Any, importlib.import_module("fcntl"))
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         except OSError:
             pass
 
