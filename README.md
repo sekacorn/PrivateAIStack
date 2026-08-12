@@ -144,7 +144,7 @@ curl -sS -X POST http://127.0.0.1:8000/v1/knowledge/documents \
 privateaistack knowledge add --directory . --source-name mission.md --content "PrivateAIStack stores local documents and audit records."
 ```
 
-`DATABASE_URL=postgresql://...` is the durable default. If PostgreSQL cannot initialize, the API does not start and cannot falsely present volatile data as persistent. `DATABASE_URL=memory://local` is an explicit test/development mode: documents are process-local and `/ready` reports a degraded `persistence: volatile` check.
+`DATABASE_URL=postgresql://...` is the durable default. If PostgreSQL cannot initialize, the API does not start and cannot falsely present volatile data as persistent. Packaged Compose verification confirmed that PostgreSQL-backed knowledge survives an API restart; task and review registries remain process-local. `DATABASE_URL=memory://local` is an explicit test/development mode: documents are process-local and `/ready` reports a degraded `persistence: volatile` check.
 
 ## Knowledge Search
 
