@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import Header, Request
 
 from private_ai_stack.api.errors import AppError
@@ -11,9 +13,11 @@ def settings_dependency() -> Settings:
     return get_settings()
 
 
-async def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
+async def require_api_key(request: Request, x_api_key: list[str] | None = Header(default=None)) -> None:
     settings = get_settings()
-    if settings.api_key and x_api_key != settings.api_key:
+    if not settings.api_key:
+        return
+    if x_api_key is None or len(x_api_key) != 1 or not secrets.compare_digest(x_api_key[0], settings.api_key):
         raise AppError("unauthorized", "Invalid or missing API key.", 401)
 
 

@@ -37,7 +37,7 @@ class VersionResponse(BaseModel):
 
 class TaskRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=8000)
-    actor: str = "local-user"
+    actor: str = Field(default="local-user", min_length=1, max_length=128)
 
 
 class TaskResponse(BaseModel):
@@ -52,8 +52,8 @@ class TaskResponse(BaseModel):
 
 
 class KnowledgeDocumentRequest(BaseModel):
-    content: str = Field(min_length=1)
-    source_name: str = "inline-document"
+    content: str = Field(min_length=1, max_length=1_000_000)
+    source_name: str = Field(default="inline-document", min_length=1, max_length=512)
     metadata: dict[str, Any] = Field(default_factory=dict)
     replace_existing: bool = False
 
@@ -66,7 +66,7 @@ class KnowledgeDocumentResponse(BaseModel):
 
 
 class KnowledgeSearchRequest(BaseModel):
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=8000)
     limit: int = Field(default=5, ge=1, le=20)
 
 
@@ -88,7 +88,7 @@ ReviewMode = Literal["safe-static", "sandboxed-execution"]
 
 
 class ReviewRequest(BaseModel):
-    repository_path: str
+    repository_path: str = Field(min_length=1, max_length=4096)
     mode: ReviewMode = "safe-static"
     languages: list[str] = Field(default_factory=lambda: ["auto"])
     include_agents: list[str] = Field(

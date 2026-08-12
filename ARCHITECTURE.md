@@ -1,6 +1,6 @@
 # PrivateAIStack Architecture
 
-PrivateAIStack is a local-first, provider-replaceable AI stack for governed agent tasks, persistent RAG, private code review, auditability, and optional open observability.
+PrivateAIStack is a local-first, provider-replaceable AI stack for governed agent tasks, explicit RAG persistence, private code review, auditability, and optional open observability.
 
 Status: Phase 1 design baseline.
 
@@ -78,26 +78,23 @@ FastAPI owns:
 - HTTP contracts and Swagger documentation.
 - Request IDs, trace IDs, structured errors, and exception redaction.
 - Task and review lifecycle APIs.
-- Safe-static repository collection.
+- Safe-static repository collection and temporary staged analysis copies.
 - Report, audit, memory, backup, and export APIs.
 
-Forge owns or fronts:
+Forge owns the normal task path:
 
 - Agent orchestration.
 - Supervisor and worker execution.
 - Model routing.
-- Tool sandbox policy checks.
-- Governance policies.
-- Audit primitives.
-- Event bus and OpenTelemetry hooks.
-- pgvector-backed memory where compatible.
+- Fixed local Ollama routing and policy evaluation for that Forge execution.
 
-PostgreSQL with pgvector owns:
+PostgreSQL owns:
 
 - Persistent RAG records.
-- Agent memory metadata.
 - Exportable memory state.
 - Database backup and restore target.
+
+Document search loads persisted vectors and calculates cosine similarity in application Python. pgvector is enabled by the Compose image but database-side ANN/vector search is not currently used.
 
 Ollama owns:
 
@@ -144,13 +141,13 @@ Verified local Forge 0.5.1-compatible exports include:
 
 Implementation note: Forge `Orchestrator.run` may return an awaitable at runtime. PrivateAIStack awaits that result and explicitly registers the configured Ollama model in a `ModelRegistry` with fixed routing to avoid accidental hosted-provider fallback.
 
-Integration points requiring implementation-time verification:
+Current implementation boundaries:
 
-- Async context manager behavior around `Orchestrator`.
-- Exact audit write and verification APIs.
-- Event subscription APIs for correlation with FastAPI request and task IDs.
-- pgvector embedding dimension validation behavior.
-- Whether PrivateAIStack needs a subprocess wrapper around deterministic tools in addition to Forge `ToolSandbox`.
+- Direct Ollama fallback is disabled by default because it does not preserve Forge-equivalent governance behavior. An explicit configuration flag enables a local, audited degraded fallback.
+- PostgreSQL initialization is performed during API startup. `memory://local` is an explicit volatile test/development mode, not an automatic fallback.
+- Task and review records are process-local and do not survive restart; documents are durable only when PostgreSQL is configured and available.
+- The local JSONL audit writer is custom application code, not an AIAuditLog runtime integration.
+- PrivateAIStack does not currently instantiate Forge memory, audit logging, event subscriptions, or Forge tool execution for the application-level static review. Static review runs selected local tools against a temporary copy and is not a Forge sandbox.
 
 ## V0.1 API Surface
 

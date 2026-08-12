@@ -7,8 +7,12 @@ from private_ai_stack.memory.embeddings import DeterministicEmbeddingModel, cosi
 from private_ai_stack.memory.models import DocumentChunk
 
 
+class PersistenceUnavailable(RuntimeError):
+    """Raised when the configured durable store cannot complete an operation."""
+
+
 class MemoryStore:
-    """Stores document chunks in PostgreSQL when available, with an in-memory fallback for tests."""
+    """Stores document chunks durably in PostgreSQL or explicitly in volatile memory."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -18,20 +22,53 @@ class MemoryStore:
         self._connection: Any | None = None
 
     async def close(self) -> None:
+        self._invalidate_connection()
+
+    def _invalidate_connection(self) -> None:
+        """Discard a broken connection so later readiness checks may reconnect."""
         if self._connection is not None:
-            self._connection.close()
+            try:
+                self._connection.close()
+            except Exception:
+                self._connection = None
+        self._connection = None
+        self._loaded = False
+
+    @property
+    def persistence_mode(self) -> str:
+        return "volatile" if self.settings.database_url == "memory://local" else "postgresql"
+
+    async def initialize(self) -> None:
+        """Initialize the configured store before accepting API traffic.
+
+        PostgreSQL failures intentionally propagate: a configured durable store must not
+        quietly become process-local memory.
+        """
+        await self._ensure_loaded()
 
     async def status(self) -> str:
         try:
             await self._ensure_loaded()
         except Exception:
             return "unavailable"
+        if self.persistence_mode == "volatile":
+            return "volatile"
+        connection = self._connection
+        if connection is None:
+            return "unavailable"
+        try:
+            with connection.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        except Exception:
+            self._invalidate_connection()
+            return "unavailable"
         return "ok"
 
     async def _ensure_loaded(self) -> None:
         if self._loaded:
             return
-        if self.settings.database_url.startswith("postgresql"):
+        if self.persistence_mode == "postgresql":
             try:
                 import psycopg
 
@@ -63,9 +100,9 @@ class MemoryStore:
                         """
                     )
                     self._connection.commit()
-            except Exception:
-                self._connection = None
-                raise
+            except Exception as exc:
+                self._invalidate_connection()
+                raise PersistenceUnavailable("Configured PostgreSQL persistence is unavailable.") from exc
         self._loaded = True
 
     def chunk_text(self, content: str, size: int = 1200, overlap: int = 120) -> list[str]:
@@ -85,7 +122,11 @@ class MemoryStore:
         await self._ensure_loaded()
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         document_id = hashlib.sha256(f"{source_name}:{content_hash}".encode()).hexdigest()[:24]
+        if len(content.encode("utf-8")) > self.settings.max_document_bytes:
+            raise ValueError("document_too_large")
         chunks = self.chunk_text(content)
+        if len(chunks) > self.settings.max_document_chunks:
+            raise ValueError("document_too_many_chunks")
         records = [
             DocumentChunk(
                 document_id=document_id,
@@ -99,7 +140,7 @@ class MemoryStore:
             for index, chunk in enumerate(chunks)
         ]
 
-        # The in-memory branch keeps unit tests and local fallback mode free of PostgreSQL dependencies.
+        # This branch is an explicit non-durable mode for tests and local experimentation.
         if self._connection is None:
             existing = [chunk for chunk in self._chunks if chunk.document_id == document_id]
             if existing and not replace_existing:
@@ -108,33 +149,39 @@ class MemoryStore:
             self._chunks.extend(records)
             return document_id, len(records), False, content_hash
 
-        with self._connection.cursor() as cur:
-            cur.execute("SELECT document_id FROM documents WHERE document_id = %s", (document_id,))
-            exists = cur.fetchone() is not None
-            if exists and not replace_existing:
-                return document_id, 0, True, content_hash
-            cur.execute("DELETE FROM documents WHERE document_id = %s", (document_id,))
-            cur.execute(
-                "INSERT INTO documents (document_id, source_name, content_hash, metadata) VALUES (%s, %s, %s, %s)",
-                (document_id, source_name, content_hash, json.dumps(metadata)),
-            )
-            for record in records:
+        try:
+            with self._connection.cursor() as cur:
+                cur.execute("SELECT document_id FROM documents WHERE document_id = %s", (document_id,))
+                exists = cur.fetchone() is not None
+                if exists and not replace_existing:
+                    return document_id, 0, True, content_hash
+                cur.execute("DELETE FROM documents WHERE document_id = %s", (document_id,))
                 cur.execute(
                     """
-                    INSERT INTO document_chunks (chunk_id, document_id, source_name, text, content_hash, embedding, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO documents (document_id, source_name, content_hash, metadata) VALUES (%s, %s, %s, %s)
                     """,
-                    (
-                        record.chunk_id,
-                        record.document_id,
-                        record.source_name,
-                        record.text,
-                        record.content_hash,
-                        json.dumps(record.embedding),
-                        json.dumps(record.metadata),
-                    ),
+                    (document_id, source_name, content_hash, json.dumps(metadata)),
                 )
-            self._connection.commit()
+                for record in records:
+                    cur.execute(
+                        """
+                        INSERT INTO document_chunks (chunk_id, document_id, source_name, text, content_hash, embedding, metadata)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            record.chunk_id,
+                            record.document_id,
+                            record.source_name,
+                            record.text,
+                            record.content_hash,
+                            json.dumps(record.embedding),
+                            json.dumps(record.metadata),
+                        ),
+                    )
+                self._connection.commit()
+        except Exception as exc:
+            self._invalidate_connection()
+            raise PersistenceUnavailable("Configured PostgreSQL persistence is unavailable.") from exc
         return document_id, len(records), False, content_hash
 
     async def search(self, query: str, limit: int = 5) -> list[tuple[DocumentChunk, float]]:
@@ -143,16 +190,20 @@ class MemoryStore:
         chunks = await self._all_chunks()
         # v0.1 favors deterministic, portable scoring over a production ANN index.
         scored = [(chunk, cosine_similarity(query_embedding, chunk.embedding)) for chunk in chunks]
-        return sorted(scored, key=lambda item: item[1], reverse=True)[:limit]
+        return sorted(scored, key=lambda item: (-item[1], item[0].chunk_id))[:limit]
 
     async def _all_chunks(self) -> list[DocumentChunk]:
         if self._connection is None:
             return list(self._chunks)
-        with self._connection.cursor() as cur:
-            cur.execute(
-                "SELECT document_id, chunk_id, source_name, text, content_hash, embedding, metadata, created_at FROM document_chunks"
-            )
-            rows = cur.fetchall()
+        try:
+            with self._connection.cursor() as cur:
+                cur.execute(
+                    "SELECT document_id, chunk_id, source_name, text, content_hash, embedding, metadata, created_at FROM document_chunks"
+                )
+                rows = cur.fetchall()
+        except Exception as exc:
+            self._invalidate_connection()
+            raise PersistenceUnavailable("Configured PostgreSQL persistence is unavailable.") from exc
         return [
             DocumentChunk(
                 document_id=row[0],
@@ -168,7 +219,7 @@ class MemoryStore:
         ]
 
     async def export_jsonl(self, path: str) -> str:
-        chunks = await self._all_chunks()
+        chunks = sorted(await self._all_chunks(), key=lambda chunk: chunk.chunk_id)
         with open(path, "w", encoding="utf-8") as handle:
             for chunk in chunks:
                 handle.write(chunk.model_dump_json() + "\n")

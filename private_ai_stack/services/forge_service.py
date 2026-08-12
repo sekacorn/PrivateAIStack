@@ -13,7 +13,7 @@ from private_ai_stack.services.ollama_service import OllamaService
 
 
 class ForgeService:
-    """Runs plan tasks through Forge while preserving a local-only fallback path."""
+    """Runs plan tasks through Forge with an explicit, opt-in degraded fallback."""
 
     def __init__(self, settings: Settings, audit: AuditWriter, ollama: OllamaService) -> None:
         self.settings = settings
@@ -22,7 +22,7 @@ class ForgeService:
         self.version = md.version("agentforge-oss")
 
     async def run_plan_task(self, goal: str, task_id: str, request_id: str, trace_id: str | None, actor: str) -> dict[str, Any]:
-        """Use Forge first, then fall back to direct Ollama without changing provider boundaries."""
+        """Use Forge first and fail closed unless direct local fallback was explicitly enabled."""
         ready, reason = await self.ollama.ensure_model()
         if not ready:
             raise RuntimeError(reason)
@@ -90,8 +90,32 @@ class ForgeService:
         try:
             return await asyncio.wait_for(_run_forge(), timeout=self.settings.task_timeout_seconds)
         except Exception as exc:
-            # Narrow runtime fallback: still use configured local Ollama, never a hosted model.
-            text = await asyncio.wait_for(self.ollama.generate(prompt), timeout=self.settings.task_timeout_seconds)
+            if not self.settings.allow_direct_ollama_fallback:
+                self.audit.write(
+                    "task.forge_failed",
+                    entity_type="task",
+                    entity_id=task_id,
+                    actor=actor,
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    details={"reason": exc.__class__.__name__, "fallback": "disabled"},
+                )
+                raise RuntimeError("forge_execution_failed") from exc
+
+            # This degraded path stays local, but does not claim Forge-equivalent policy behavior.
+            try:
+                text = await asyncio.wait_for(self.ollama.generate(prompt), timeout=self.settings.task_timeout_seconds)
+            except Exception as fallback_exc:
+                self.audit.write(
+                    "task.forge_fallback_failed",
+                    entity_type="task",
+                    entity_id=task_id,
+                    actor=actor,
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    details={"reason": fallback_exc.__class__.__name__, "provider": "ollama"},
+                )
+                raise RuntimeError("ollama_fallback_failed") from fallback_exc
             self.audit.write(
                 "task.forge_fallback",
                 entity_type="task",

@@ -19,7 +19,7 @@ async def ready(request: Request) -> ReadyResponse:
     checks = {
         "ollama": await request.app.state.ollama.status(),
         "ollama_model": "ok" if model_ready else model_reason,
-        "memory": await request.app.state.memory.status(),
+        "persistence": await request.app.state.memory.status(),
     }
     overall = "ready" if all(value == "ok" for value in checks.values()) else "degraded"
     return ReadyResponse(status=overall, checks=checks)

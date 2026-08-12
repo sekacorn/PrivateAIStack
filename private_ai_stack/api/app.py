@@ -23,8 +23,10 @@ from private_ai_stack.services.task_service import TaskService
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_telemetry(settings)
-    audit = AuditWriter(settings.audit_dir / "audit.jsonl")
+    audit = AuditWriter(settings.audit_dir / "audit.jsonl", max_record_bytes=settings.max_audit_record_bytes)
     memory = MemoryStore(settings)
+    # PostgreSQL is the durable default. Startup fails instead of silently losing RAG data.
+    await memory.initialize()
     ollama = OllamaService(settings)
     forge = ForgeService(settings, audit, ollama)
     app.state.audit = audit
@@ -44,16 +46,16 @@ def create_app() -> FastAPI:
         version=__version__,
         description="Local-first AI agents, persistent RAG, governed code review, auditability, and optional observability.",
         lifespan=lifespan,
-        dependencies=[Depends(require_api_key)],
     )
     app.middleware("http")(request_context_middleware)
     register_error_handlers(app)
     app.include_router(health.router)
-    app.include_router(tasks.router, prefix="/v1")
-    app.include_router(knowledge.router, prefix="/v1")
-    app.include_router(reviews.router, prefix="/v1")
-    app.include_router(models.router, prefix="/v1")
-    app.include_router(policies.router, prefix="/v1")
+    protected = [Depends(require_api_key)]
+    app.include_router(tasks.router, prefix="/v1", dependencies=protected)
+    app.include_router(knowledge.router, prefix="/v1", dependencies=protected)
+    app.include_router(reviews.router, prefix="/v1", dependencies=protected)
+    app.include_router(models.router, prefix="/v1", dependencies=protected)
+    app.include_router(policies.router, prefix="/v1", dependencies=protected)
     return app
 
 

@@ -7,7 +7,7 @@ name = "privateaistack"
 version = "0.1.0a3"
 description = "Local-first AI agents, persistent RAG, governed code review, auditability, and optional observability."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = "Apache-2.0"
 authors = [{ name = "sekacorn" }]
 maintainers = [{ name = "sekacorn" }]

@@ -2,10 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from private_ai_stack.reviews.collector import collect_repository
+from private_ai_stack.reviews.collector import collect_repository, materialize_snapshot
 from private_ai_stack.reviews.findings import ToolRun
 from private_ai_stack.reviews.normalizers import normalize_tool_runs
 from private_ai_stack.reviews.reports import markdown_report
+from private_ai_stack.tools.command_runner import CommandRunner
 
 
 def test_collect_repository_excludes_secret_paths(tmp_path: Path) -> None:
@@ -78,3 +79,34 @@ def test_collect_repository_rejects_missing_path(tmp_path: Path) -> None:
         assert "does not exist" in str(exc)
     else:
         raise AssertionError("missing repository should fail")
+
+
+def test_materialized_snapshot_excludes_secret_content(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    snapshot = collect_repository(str(tmp_path), 250_000)
+    staged = tmp_path / "staged"
+
+    materialize_snapshot(snapshot, staged)
+
+    assert (staged / "app.py").exists()
+    assert not (staged / ".env").exists()
+
+
+def test_command_runner_bounds_flooding_output() -> None:
+    runner = CommandRunner(timeout_seconds=5, max_output_bytes=256)
+
+    run = runner.run("python", ["-c", "print('x' * 10000)"], Path.cwd(), "Python is required.")
+
+    assert run.status == "failed"
+    assert run.reason == "output_limit_exceeded"
+    assert len(run.stdout.encode("utf-8")) <= 256
+
+
+def test_command_runner_times_out() -> None:
+    runner = CommandRunner(timeout_seconds=0.05, max_output_bytes=256)
+
+    run = runner.run("python", ["-c", "import time; time.sleep(1)"], Path.cwd(), "Python is required.")
+
+    assert run.status == "failed"
+    assert run.reason == "timeout"

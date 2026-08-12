@@ -2,9 +2,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from private_ai_stack.api.app import create_app
 from private_ai_stack.config.settings import get_settings
+from private_ai_stack.memory.store import PersistenceUnavailable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,3 +47,69 @@ def test_review_sample_target(client: TestClient) -> None:
     payload = response.json()
     assert payload["status"] == "succeeded"
     assert payload["summary"]["source_unchanged"] is True
+
+
+def test_api_key_protects_operational_routes_but_not_liveness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "memory://local")
+    monkeypatch.setenv("API_KEY", "0123456789abcdef")
+    monkeypatch.setenv("AUDIT_DIR", str(tmp_path / "audit"))
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("EXPORT_DIR", str(tmp_path / "exports"))
+    get_settings.cache_clear()
+    with TestClient(create_app()) as secured:
+        assert secured.get("/health").status_code == 200
+        assert secured.get("/v1/policies").status_code == 401
+        assert secured.get("/v1/policies", headers={"x-api-key": "0123456789abcdef"}).status_code == 200
+    get_settings.cache_clear()
+
+
+def test_invalid_settings_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        get_settings.cache_clear()
+        from private_ai_stack.config.settings import Settings
+
+        Settings(database_url="sqlite:///unexpected.db")
+    with pytest.raises(ValidationError):
+        from private_ai_stack.config.settings import Settings
+
+        Settings(environment="production", api_key=None)
+    with pytest.raises(ValidationError):
+        from private_ai_stack.config.settings import Settings
+
+        Settings(unexpected_setting="rejected")
+
+
+def test_oversized_request_id_is_replaced(client: TestClient) -> None:
+    response = client.get("/health", headers={"x-request-id": "x" * 129})
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] != "x" * 129
+
+
+def test_durable_store_startup_failure_is_not_reported_as_healthy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def unavailable(_: object) -> None:
+        raise RuntimeError("database_unavailable")
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:password@db.example/private")
+    monkeypatch.setenv("AUDIT_DIR", str(tmp_path / "audit"))
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("EXPORT_DIR", str(tmp_path / "exports"))
+    monkeypatch.setattr("private_ai_stack.api.app.MemoryStore.initialize", unavailable)
+    get_settings.cache_clear()
+
+    with pytest.raises(RuntimeError, match="database_unavailable"):
+        with TestClient(create_app()):
+            pass
+
+    get_settings.cache_clear()
+
+
+def test_knowledge_persistence_failure_is_explicitly_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def unavailable(*_: object) -> object:
+        raise PersistenceUnavailable("database unavailable")
+
+    monkeypatch.setattr("private_ai_stack.services.knowledge_service.MemoryStore.ingest", unavailable)
+    response = client.post("/v1/knowledge/documents", json={"source_name": "doc.md", "content": "audit records"})
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "persistence_unavailable"

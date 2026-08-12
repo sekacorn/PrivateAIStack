@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 from private_ai_stack.api.errors import AppError
@@ -15,8 +16,11 @@ class TaskService:
         self.settings = settings
         self._tasks: dict[str, TaskResponse] = {}
         self._events: dict[str, list[dict[str, object]]] = {}
+        self._semaphore = asyncio.BoundedSemaphore(settings.max_workers)
 
     async def create_task(self, payload: TaskRequest, request_id: str, trace_id: str | None) -> TaskResponse:
+        if self._semaphore.locked():
+            raise AppError("task_capacity_exhausted", "Maximum concurrent task capacity is in use.", 429)
         with span("task.create"):
             task_id = str(uuid.uuid4())
             now = utc_now()
@@ -35,7 +39,8 @@ class TaskService:
                 details={"goal_length": len(payload.goal)},
             )
             try:
-                result = await self.forge.run_plan_task(payload.goal, task_id, request_id, trace_id, payload.actor)
+                async with self._semaphore:
+                    result = await self.forge.run_plan_task(payload.goal, task_id, request_id, trace_id, payload.actor)
                 task.status = Status.succeeded
                 task.result = result
                 self._events[task_id].append({"event": "task.succeeded", "timestamp": utc_now().isoformat()})

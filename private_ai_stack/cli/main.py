@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import socket
@@ -17,6 +16,7 @@ import httpx
 import typer
 
 from private_ai_stack import __version__
+from private_ai_stack.audit.writer import AuditWriter
 
 SUCCESS = 0
 RUNTIME_FAILURE = 1
@@ -541,23 +541,9 @@ def audit_verify(directory: Annotated[Path, typer.Option("--directory", "-d", he
     path = ensure_directory(directory) / "audit" / "audit.jsonl"
     if not path.exists():
         fail(f"No audit log found at {path}", INVALID_INPUT)
-    previous: str | None = None
-    count = 0
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            if record.get("previous_hash") != previous:
-                fail(f"Audit hash chain mismatch on line {line_number}.", RUNTIME_FAILURE)
-            expected = record.get("record_hash")
-            payload = dict(record)
-            payload.pop("record_hash", None)
-            actual = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-            if actual != expected:
-                fail(f"Audit record hash mismatch on line {line_number}.", RUNTIME_FAILURE)
-            previous = actual
-            count += 1
+    valid, count, reason = AuditWriter(path, verify_existing=False).verify()
+    if not valid:
+        fail(reason or "Audit chain verification failed.", RUNTIME_FAILURE)
     typer.echo(f"Audit chain OK ({count} records)")
 
 

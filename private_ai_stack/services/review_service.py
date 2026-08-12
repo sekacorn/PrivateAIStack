@@ -1,13 +1,15 @@
 import hashlib
 import uuid
+from asyncio import to_thread
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from private_ai_stack.agents.supervisor import ReviewSupervisor
 from private_ai_stack.api.errors import AppError
 from private_ai_stack.api.schemas import ReviewRequest, ReviewResponse, Status, utc_now
 from private_ai_stack.audit.writer import AuditWriter
 from private_ai_stack.config.settings import Settings
-from private_ai_stack.reviews.collector import collect_repository
+from private_ai_stack.reviews.collector import collect_repository, materialize_snapshot
 from private_ai_stack.reviews.exclusions import is_excluded
 from private_ai_stack.reviews.findings import Finding
 from private_ai_stack.reviews.normalizers import normalize_tool_runs
@@ -42,13 +44,21 @@ class ReviewService:
             details={"repository_path": payload.repository_path, "mode": payload.mode},
         )
         try:
-            before_hash = self._tree_hash(payload.repository_path)
-            snapshot = collect_repository(payload.repository_path, self.settings.max_review_file_bytes)
-            runs = run_static_tools(snapshot.root, "python" in snapshot.languages)
+            before_hash = await to_thread(self._tree_hash, payload.repository_path)
+            snapshot = await to_thread(collect_repository, payload.repository_path, self.settings.max_review_file_bytes)
+            with TemporaryDirectory(prefix="private-ai-stack-review-") as temporary_directory:
+                staged_root = await to_thread(materialize_snapshot, snapshot, Path(temporary_directory))
+                runs = await to_thread(
+                    run_static_tools,
+                    staged_root,
+                    "python" in snapshot.languages,
+                    self.settings.review_timeout_seconds,
+                    self.settings.max_static_tool_output_bytes,
+                )
             findings = normalize_tool_runs(runs)
             summary = ReviewSupervisor().summarize(snapshot, findings, runs)
             paths = write_reports(self.settings.reports_dir, review_id, summary, findings)
-            after_hash = self._tree_hash(payload.repository_path)
+            after_hash = await to_thread(self._tree_hash, payload.repository_path)
             unchanged = before_hash == after_hash
             summary["source_unchanged"] = unchanged
             self._findings[review_id] = findings
@@ -99,7 +109,10 @@ class ReviewService:
         return {"format": "markdown", "content": markdown_report(summary, findings)}
 
     def _tree_hash(self, path: str) -> str:
-        root = Path(path).resolve()
+        supplied_root = Path(path)
+        if supplied_root.is_symlink():
+            raise ValueError("Repository path must not be a symbolic link.")
+        root = supplied_root.resolve()
         digest = hashlib.sha256()
         for item in sorted(root.rglob("*")):
             if item.is_file() and not is_excluded(item, root, self.settings.max_review_file_bytes)[0]:

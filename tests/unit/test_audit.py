@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from private_ai_stack.audit.writer import AuditWriter
@@ -41,3 +42,28 @@ def test_audit_loads_previous_hash_and_exports(tmp_path: Path) -> None:
     assert second.previous_hash == first.record_hash
     assert export.exists()
     assert second_writer.records_for("missing") == []
+
+
+def test_audit_concurrent_writers_keep_one_valid_chain(tmp_path: Path) -> None:
+    path = tmp_path / "audit.jsonl"
+
+    def append(index: int) -> None:
+        AuditWriter(path).write("event.concurrent", entity_type="task", entity_id=str(index))
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(append, range(24)))
+
+    valid, count, reason = AuditWriter(path).verify()
+    assert valid, reason
+    assert count == 24
+
+
+def test_audit_rejects_malformed_existing_log(tmp_path: Path) -> None:
+    path = tmp_path / "audit.jsonl"
+    path.write_text("not-json\n", encoding="utf-8")
+
+    valid, count, reason = AuditWriter(path, verify_existing=False).verify()
+
+    assert not valid
+    assert count == 0
+    assert reason and "not valid JSON" in reason

@@ -1,3 +1,4 @@
+from private_ai_stack.api.errors import AppError
 from private_ai_stack.api.schemas import (
     KnowledgeDocumentRequest,
     KnowledgeDocumentResponse,
@@ -6,7 +7,7 @@ from private_ai_stack.api.schemas import (
     KnowledgeSearchResponse,
 )
 from private_ai_stack.audit.writer import AuditWriter
-from private_ai_stack.memory.store import MemoryStore
+from private_ai_stack.memory.store import MemoryStore, PersistenceUnavailable
 
 
 class KnowledgeService:
@@ -15,12 +16,17 @@ class KnowledgeService:
         self.audit = audit
 
     async def ingest(self, payload: KnowledgeDocumentRequest) -> KnowledgeDocumentResponse:
-        document_id, count, idempotent, content_hash = await self.memory.ingest(
-            payload.content,
-            payload.source_name,
-            payload.metadata,
-            payload.replace_existing,
-        )
+        try:
+            document_id, count, idempotent, content_hash = await self.memory.ingest(
+                payload.content,
+                payload.source_name,
+                payload.metadata,
+                payload.replace_existing,
+            )
+        except ValueError as exc:
+            raise AppError("knowledge_input_rejected", "Knowledge document exceeds configured local limits.", 413) from exc
+        except PersistenceUnavailable as exc:
+            raise AppError("persistence_unavailable", "Configured knowledge persistence is unavailable.", 503) from exc
         self.audit.write(
             "knowledge.ingested",
             entity_type="document",
@@ -30,7 +36,10 @@ class KnowledgeService:
         return KnowledgeDocumentResponse(document_id=document_id, chunks_created=count, idempotent=idempotent, content_hash=content_hash)
 
     async def search(self, payload: KnowledgeSearchRequest) -> KnowledgeSearchResponse:
-        results = await self.memory.search(payload.query, payload.limit)
+        try:
+            results = await self.memory.search(payload.query, payload.limit)
+        except PersistenceUnavailable as exc:
+            raise AppError("persistence_unavailable", "Configured knowledge persistence is unavailable.", 503) from exc
         hits = [
             KnowledgeHit(
                 document_id=chunk.document_id,

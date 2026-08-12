@@ -72,14 +72,9 @@ PrivateAIStack provides application-level governance for local AI workflows. It 
 
 ### sandboxed-execution
 
-- Experimental.
-- Requires explicit approval.
-- Uses a disposable isolated container.
-- Applies CPU, memory, process, and time limits.
-- Does not mount the host Docker socket.
-- Network is disabled by default.
-
-This mode reduces risk but must not be described as complete isolation.
+- Intentionally unavailable in the current Alpha implementation.
+- The API returns an approval-required response rather than pretending to provide a sandbox.
+- A future implementation must define explicit approval, isolation, resource, and network controls before this mode can be enabled.
 
 ## Telemetry Protections
 
