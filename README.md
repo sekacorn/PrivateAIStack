@@ -2,9 +2,9 @@
 
 ### A local-first AI stack for controlled model execution, explicit RAG persistence, auditability, and reproducible development deployment.
 
-PrivateAIStack is a local-first v0.1 foundation for running governed AI-agent workflows on infrastructure you control. It uses FastAPI, Forge from `agentforge-oss`, Ollama, PostgreSQL/pgvector, portable audit records, deterministic code-quality tools, and optional OpenTelemetry tracing.
+PrivateAIStack is a local-first Beta candidate for running governed AI-agent workflows on infrastructure you control. It uses FastAPI, Forge from `agentforge-oss`, Ollama, PostgreSQL/pgvector, portable audit records, deterministic code-quality tools, and optional OpenTelemetry tracing.
 
-Status: alpha package `0.1.0a3`. Production hardening, security review, and organization-specific policy review are required before operational use.
+Status: Beta candidate `0.2.0b1`. This candidate is not a claim of production hardening: security review and organization-specific policy review remain required before operational use.
 
 ## What It Does
 
@@ -41,10 +41,10 @@ User or CI -> FastAPI -> Forge Orchestrator
 
 ## Five-Minute Quickstart
 
-Install the published alpha package:
+After this candidate is published, install its exact version:
 
 ```bash
-python -m pip install "privateaistack==0.1.0a3"
+python -m pip install "privateaistack==0.2.0b1"
 privateaistack --version
 ```
 
@@ -184,7 +184,7 @@ Policies deny sensitive file reads, require approval for network access, and log
 curl -sS http://127.0.0.1:8000/v1/policies
 ```
 
-The v0.1 HTTP API exposes the policy catalog. Executable policy-gate checks are currently covered through the internal policy engine and tests, not a public policy-test endpoint.
+The current HTTP API exposes the policy catalog. Executable policy-gate checks are currently covered through the internal policy engine and tests, not a public policy-test endpoint.
 
 ## Backup, Restore, And Export
 

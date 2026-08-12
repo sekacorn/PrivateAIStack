@@ -1,6 +1,6 @@
 # Policy Guide
 
-PrivateAIStack uses Forge policy-as-code where compatible and a narrow local policy catalog for documented v0.1 behavior.
+PrivateAIStack uses Forge policy-as-code where compatible and a narrow local policy catalog for its documented Beta-candidate behavior.
 
 Default policies:
 

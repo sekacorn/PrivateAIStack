@@ -1,14 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.2.0b1 - 2026-08-12
 
-### Beta-hardening preparation
+### First Beta candidate
 
 - Made PostgreSQL-backed knowledge persistence explicit at startup and retained `memory://local` only as an explicit volatile test/development mode.
 - Disabled direct Ollama fallback by default; it now requires an explicit degraded-mode configuration because it is not Forge-equivalent execution.
 - Hardened local audit append and verification behavior for cooperating writers, malformed records, and bounded records.
 - Staged safe-static review inputs, bounded tool output and total review time, and clarified that static tools are local subprocesses rather than a VM sandbox.
 - Tightened configuration, API-key comparison, request/input limits, deterministic retrieval ordering, and public operational-boundary documentation.
+
+The Beta candidate retains documented operational limits: Compose is development-oriented, tasks and reviews are process-local, audit chains are tamper-evident rather than immutable, and backup/restore and telemetry have not yet been live-verified.
 
 ## 0.1.0a3 - 2026-08-06
 

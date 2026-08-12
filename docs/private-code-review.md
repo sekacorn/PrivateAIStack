@@ -1,8 +1,8 @@
 # Private Code Review Design
 
-Status: Phase 1 design baseline.
+Status: Beta candidate design and runtime boundary.
 
-The flagship v0.1 workflow is reviewing a local source-code repository without uploading it to an external AI service.
+The flagship workflow is reviewing a local source-code repository without uploading it to an external AI service.
 
 ## Core Rule
 

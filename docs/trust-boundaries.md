@@ -1,6 +1,6 @@
 # Trust Boundaries
 
-Status: Phase 1 design baseline.
+Status: `0.2.0b1` Beta candidate trust-boundary documentation.
 
 ```text
 User or CI

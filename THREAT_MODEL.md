@@ -1,6 +1,6 @@
 # PrivateAIStack Threat Model
 
-Status: Phase 1 design baseline.
+Status: `0.2.0b1` Beta candidate threat model.
 
 PrivateAIStack provides application-level governance for local AI workflows. It is not VM-grade isolation, a container escape prevention system, or a substitute for professional security review.
 
@@ -72,7 +72,7 @@ PrivateAIStack provides application-level governance for local AI workflows. It 
 
 ### sandboxed-execution
 
-- Intentionally unavailable in the current Alpha implementation.
+- Intentionally unavailable in the current Beta candidate.
 - The API returns an approval-required response rather than pretending to provide a sandbox.
 - A future implementation must define explicit approval, isolation, resource, and network controls before this mode can be enabled.
 

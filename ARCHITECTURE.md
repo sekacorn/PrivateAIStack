@@ -2,7 +2,7 @@
 
 PrivateAIStack is a local-first, provider-replaceable AI stack for governed agent tasks, explicit RAG persistence, private code review, auditability, and optional open observability.
 
-Status: Phase 1 design baseline.
+Status: `0.2.0b1` Beta candidate architecture.
 
 Author: sekacorn
 
@@ -10,7 +10,7 @@ Project contact: Open a GitHub repository issue for general project questions.
 
 Security contact: Use GitHub Security Advisories if enabled, or contact the maintainer through the repository without posting sensitive details publicly.
 
-## V0.1 Decisions
+## Current Decisions
 
 - Repository: https://github.com/sekacorn/PrivateAIStack.git
 - Original repository code license: Apache-2.0
@@ -112,7 +112,7 @@ Agents own:
 
 ## Forge Integration Baseline
 
-The minimum supported Forge package for v0.1 is expected to be:
+The supported Forge package range is:
 
 ```text
 agentforge-oss>=0.5.1,<0.6.0
@@ -124,7 +124,7 @@ Verified import:
 import forge
 ```
 
-Verified local Forge 0.5.1-compatible exports include:
+Verified local Forge `0.5.3` exports include:
 
 - `Orchestrator`
 - `Agent`
@@ -149,7 +149,7 @@ Current implementation boundaries:
 - The local JSONL audit writer is custom application code, not an AIAuditLog runtime integration.
 - PrivateAIStack does not currently instantiate Forge memory, audit logging, event subscriptions, or Forge tool execution for the application-level static review. Static review runs selected local tools against a temporary copy and is not a Forge sandbox.
 
-## V0.1 API Surface
+## Current API Surface
 
 Required endpoints:
 
@@ -239,7 +239,7 @@ Public-sector and restricted-environment deployments must still be evaluated aga
 
 ## Design Constraints
 
-- No custom React or Next.js frontend in v0.1.
+- No custom React or Next.js frontend in the current Beta candidate.
 - No automatic large model download.
 - No database port published by default.
 - No Docker socket mount.

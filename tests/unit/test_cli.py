@@ -5,6 +5,7 @@ from importlib.resources import files
 
 from typer.testing import CliRunner
 
+from private_ai_stack import __version__
 from private_ai_stack.audit.writer import AuditWriter
 from private_ai_stack.cli import main as cli
 
@@ -15,7 +16,7 @@ def test_cli_version() -> None:
     result = runner.invoke(cli.app, ["--version"])
 
     assert result.exit_code == 0
-    assert "privateaistack 0.1.0a3" in result.stdout
+    assert f"privateaistack {__version__}" in result.stdout
 
 
 def test_deployment_template_is_packaged() -> None:
@@ -26,6 +27,8 @@ def test_deployment_template_is_packaged() -> None:
     assert template_root.joinpath(".env.example").is_file()
     assert template_root.joinpath("config", "otel-collector.yaml").is_file()
     assert template_root.joinpath("docker", "postgres", "init.sql").is_file()
+    template_metadata = json.loads(template_root.joinpath(".privateaistack-template.json").read_text(encoding="utf-8"))
+    assert template_metadata["version"] == __version__
 
 
 def test_init_refuses_non_empty_directory(tmp_path) -> None:

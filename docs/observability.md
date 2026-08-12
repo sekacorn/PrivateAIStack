@@ -1,6 +1,6 @@
 # Observability
 
-Observability is optional in v0.1.
+Observability is optional in the current Beta candidate and remains disabled by default.
 
 Default startup:
 

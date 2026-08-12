@@ -21,8 +21,8 @@ Do not add a PyPI API token secret.
 ## Release
 
 ```bash
-git tag -a v0.1.0a3 -m "privateaistack 0.1.0a3"
-git push origin v0.1.0a3
+git tag -a v0.2.0b1 -m "privateaistack 0.2.0b1"
+git push origin v0.2.0b1
 ```
 
 Only tag after local checks, artifact inspection, clean wheel and source-distribution installs, Compose validation, pushed CI, GitHub environment setup, and PyPI Trusted Publisher configuration are complete.

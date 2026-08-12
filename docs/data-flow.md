@@ -1,6 +1,6 @@
 # Data Flow
 
-Status: Phase 1 design baseline.
+Status: `0.2.0b1` Beta candidate data-flow documentation.
 
 ## Agent Task Flow
 

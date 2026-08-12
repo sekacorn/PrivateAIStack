@@ -11,7 +11,7 @@ Each template includes `.privateaistack-template.json` with:
 - Pinned Ollama image.
 - Observability profile name.
 
-The template version should normally match the Python package version for alpha releases. If a future patch changes only the template and not runtime code, document the compatibility boundary here and in `CHANGELOG.md`.
+The template version should normally match the Python package version for pre-release and stable releases. If a future patch changes only the template and not runtime code, document the compatibility boundary here and in `CHANGELOG.md`.
 
 Template rules:
 
