@@ -63,6 +63,32 @@ Each is a compatible reimplementation of code this ecosystem already ships, and
 the tests hold them to the originals' output rather than asserting it in a
 comment. An unknown model id is refused rather than approximated.
 
+## Changing an embedder requires a new revision
+
+An identity is a promise about arithmetic, and `revision` is the only part of
+it that can carry a change. So:
+
+> **Any change to an embedder's output requires a new `revision` in its model
+> identity.** Refactoring that provably leaves every vector untouched does not.
+
+Without that rule a refactor silently invalidates every store, record and
+digest already produced under the old behaviour, and no reader can tell: the
+identity in the evidence still reads the same, and the evidence still verifies
+against itself. A 3b-6 scanner re-running a rebuild would then get different
+vectors from a record that looks correct, and the honest conclusion available
+to it — that the operator is wrong — would be the wrong one.
+
+`tests/fixtures/reembed/golden-vectors.json` pins the exact output of every
+built-in identity, at more than one width because the bucket a token lands in
+depends on the width. `tests/unit/test_reembed_golden_vectors.py` fails if any
+of it moves. When it fails, bump the revision; editing the fixture to match new
+output is the one response that is never correct.
+
+Conformance against AgentForge is checked twice: in the ordinary test run
+against the installed `agentforge-oss`, and in CI's `embedder-conformance` job
+against the latest release in the range this project declares, so a newer
+release that changed the scheme cannot pass unnoticed behind a pinned floor.
+
 ## Interruption and resume
 
 A run over a large store is long and interruptible, so it is a resumable batch
