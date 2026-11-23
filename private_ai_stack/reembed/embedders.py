@@ -102,10 +102,14 @@ class AgentForgeHashedBagOfWords:
     def identity(self) -> ModelIdentity:
         return self._identity
 
+    def tokens(self, text: str) -> list[str]:
+        """The tokens :meth:`embed` will hash, so a count cannot drift from the vector."""
+        return self._TOKEN.findall(text.lower())
+
     def embed(self, text: str) -> list[float]:
         dimensions = self._identity.dimensions
         values = [0.0] * dimensions
-        for token in self._TOKEN.findall(text.lower()):
+        for token in self.tokens(text):
             digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
             values[int.from_bytes(digest, "big") % dimensions] += 1.0
         norm = math.sqrt(sum(value * value for value in values))
@@ -133,10 +137,14 @@ class PrivateAIStackSignedHashedBagOfWords:
     def identity(self) -> ModelIdentity:
         return self._identity
 
+    def tokens(self, text: str) -> list[str]:
+        """The tokens :meth:`embed` will hash, so a count cannot drift from the vector."""
+        return text.lower().split()
+
     def embed(self, text: str) -> list[float]:
         dimensions = self._identity.dimensions
         values = [0.0] * dimensions
-        for token in text.lower().split():
+        for token in self.tokens(text):
             digest = hashlib.sha256(token.encode("utf-8")).digest()
             index = int.from_bytes(digest[:4], "big") % dimensions
             values[index] += 1.0 if digest[4] % 2 == 0 else -1.0

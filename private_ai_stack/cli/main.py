@@ -17,6 +17,21 @@ import typer
 
 from private_ai_stack import __version__
 from private_ai_stack.audit.writer import AuditWriter
+from private_ai_stack.reembed import (
+    BUILT_IN_MODEL_IDS,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_SAMPLE_SEED,
+    DEFAULT_SAMPLE_SIZE,
+    CheckpointError,
+    EmbedderError,
+    EstimateError,
+    EvidenceError,
+    ModelIdentity,
+    ReEmbedError,
+    estimate_re_embed,
+    load_cost_profile,
+    re_embed_store,
+)
 
 SUCCESS = 0
 RUNTIME_FAILURE = 1
@@ -48,11 +63,13 @@ model_app = typer.Typer(help="Manage Ollama models through the Compose service."
 task_app = typer.Typer(help="Run agent tasks through the API.")
 knowledge_app = typer.Typer(help="Add and search local knowledge through the API.")
 audit_app = typer.Typer(help="Inspect and export local audit logs.")
+reembed_app = typer.Typer(help="Rebuild a vector store with a different embedding model.")
 app.add_typer(config_app, name="config")
 app.add_typer(model_app, name="model")
 app.add_typer(task_app, name="task")
 app.add_typer(knowledge_app, name="knowledge")
 app.add_typer(audit_app, name="audit")
+app.add_typer(reembed_app, name="reembed")
 
 
 def version_callback(value: bool) -> None:
@@ -590,6 +607,87 @@ def restore(
             echo_result(ps)
             raise CliError("PostgreSQL restore failed.", RUNTIME_FAILURE)
         typer.echo("Restore completed")
+    except Exception as exc:
+        handle_error(exc, verbose)
+
+
+@reembed_app.command("run")
+def reembed_run(
+    source_document: Annotated[Path, typer.Argument(help="An embedding-portability.v1 evidence document.")],
+    source_store_id: Annotated[str, typer.Option("--source-store", help="Which store in that document to rebuild.")],
+    target_directory: Annotated[Path, typer.Option("--target-directory", help="Where to write the rebuilt store.")],
+    target_store_id: Annotated[str, typer.Option("--target-store", help="Identifier for the rebuilt store.")],
+    model_id: Annotated[str, typer.Option("--model-id", help=f"Target model id. Built in: {', '.join(BUILT_IN_MODEL_IDS)}.")],
+    model_revision: Annotated[str, typer.Option("--model-revision", help="Target model revision.")],
+    dimensions: Annotated[int, typer.Option("--dimensions", help="Target model dimensions. Never defaulted.")],
+    availability: Annotated[str, typer.Option("--availability", help="open_weight_self_hostable or vendor_only. An operator attestation.")],
+    estimate_only: Annotated[
+        bool,
+        typer.Option(
+            "--estimate-only",
+            help="Measure a calibration sample, report the estimate and exit without rebuilding the store.",
+        ),
+    ] = False,
+    sample_size: Annotated[
+        int, typer.Option("--sample-size", help="Calibration sample size. 0 reports no estimate rather than a guess.")
+    ] = DEFAULT_SAMPLE_SIZE,
+    sample_seed: Annotated[
+        str, typer.Option("--sample-seed", help="Seed for the sample selection, recorded in the estimate.")
+    ] = DEFAULT_SAMPLE_SEED,
+    cost_profile: Annotated[
+        Path | None,
+        typer.Option("--cost-profile", help="A local cost profile as JSON, in AIMeter's shape. Without one, no money figure is reported."),
+    ] = None,
+    batch_size: Annotated[int, typer.Option("--batch-size", help="Records per batch and per shard.")] = DEFAULT_BATCH_SIZE,
+    output: Annotated[Path | None, typer.Option("--estimate-output", help="Also write the estimate document here.")] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show raw exceptions.")] = False,
+) -> None:
+    """Rebuild a store with a different model, or estimate what that would cost.
+
+    ``--estimate-only`` embeds the calibration sample and nothing else: no
+    shard, no checkpoint and no rebuilt store are written.
+    """
+    try:
+        identity = ModelIdentity(id=model_id, revision=model_revision, dimensions=dimensions)
+        profile = load_cost_profile(cost_profile.expanduser().resolve()) if cost_profile is not None else None
+        if estimate_only:
+            estimate = estimate_re_embed(
+                source_document=source_document.expanduser().resolve(),
+                source_store_id=source_store_id,
+                target_model=identity,
+                sample_size=sample_size,
+                sample_seed=sample_seed,
+                cost_profile=profile,
+                output=None if output is None else output.expanduser().resolve(),
+            )
+            print_json(estimate.to_document())
+            return
+        outcome = re_embed_store(
+            source_document=source_document.expanduser().resolve(),
+            source_store_id=source_store_id,
+            target_directory=target_directory.expanduser().resolve(),
+            target_store_id=target_store_id,
+            target_model=identity,
+            availability=availability,
+            batch_size=batch_size,
+        )
+        print_json(
+            {
+                "target_document": str(outcome.target_document),
+                "record": str(outcome.record),
+                "checkpoint": str(outcome.checkpoint),
+                "total_records": outcome.total_records,
+                "retained_rebuilt": outcome.retained_rebuilt,
+                "missing_skipped": outcome.missing_skipped,
+                "deleted_by_policy_skipped": outcome.deleted_by_policy_skipped,
+                "batches_completed": outcome.batches_completed,
+                "batches_embedded_now": outcome.batches_embedded_now,
+                "resumed": outcome.resumed,
+                "complete": outcome.complete,
+            }
+        )
+    except (EstimateError, EmbedderError, EvidenceError, ReEmbedError, CheckpointError) as exc:
+        handle_error(CliError(str(exc), INVALID_INPUT), verbose)
     except Exception as exc:
         handle_error(exc, verbose)
 

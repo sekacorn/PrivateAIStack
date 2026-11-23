@@ -121,6 +121,57 @@ that is 64 MiB of text, and 64 vectors at the 8192-dimension ceiling is under
 5 MiB as Python floats. Operators with more memory can raise it; the point of
 the default is that nobody has to.
 
+## Estimating a run before committing to it
+
+```powershell
+privateaistack reembed run evidence/embedding-portability.json --source-store support-memory --target-directory rebuilt --target-store support-memory-rebuilt --model-id privateaistack.hashed-bow.sha256-signed --model-revision 1 --dimensions 64 --availability open_weight_self_hostable --estimate-only
+```
+
+`--estimate-only` embeds a small **calibration sample**, measures it, and
+extrapolates to the whole store as a `re-embed-estimate.v1` document. No shard,
+no checkpoint and no rebuilt store are written, and no vector is kept.
+
+The sample exists because AIMeter cannot forecast.
+`calculate_local_inference_cost` needs an *observed* `performance.latency_ms`
+greater than zero and `calculate_provider_cost` is token-driven, so neither can
+be called before a run. Measuring a few records is the only honest way to get
+a number, and the estimate reports which part is which:
+
+| Field | Exactness |
+|---|---|
+| `records_to_embed` | exact, from the evidence document |
+| `calibration` | measured, on this machine, for `sample_size` records |
+| `projection` | extrapolated from the per-record means |
+| `cost` | AIMeter's, when a profile was supplied; otherwise a stated reason there is none |
+| `limits` | what the estimate does not claim, always including that it is not a quotation |
+
+`--sample-size 0` reports **no estimate at all** rather than a fabricated one.
+A sample larger than the store is capped at the store.
+
+Records are selected by `sha256(seed + ':' + record_id)` order rather than by
+identifier, because nothing says identifiers are unrelated to record size, and
+taking the first N would be reproducibly biased. The seed is recorded so the
+selection can be repeated.
+
+Tokens are counted by asking the embedder for the tokens it will actually hash,
+so a count cannot drift from the vector it describes. An embedder that does not
+expose its tokenisation gets a whitespace count that says so on its face.
+
+### Cost in money comes from AIMeter, or not at all
+
+Pass `--cost-profile profile.json`, in the shape AIMeter's
+`local_cost_profile_catalog()` emits, and the money arithmetic is delegated to
+`aimeter-oss` and credited in the document. This project does not depend on
+AIMeter, so without it installed the estimate says exactly that and reports
+records, tokens and latency instead. Nothing here reimplements that arithmetic,
+and a profile's own assumptions are the operator's: AIMeter's templates state
+on their face that they are examples to be replaced.
+
+The estimate is a **forecast, not evidence**. `exit-report` never reads it, it
+carries no digest of itself, and it is deliberately not reproducible: measured
+latency depends on the machine and its load at the time. Only the counts in it
+are stable.
+
 ## What this does not do yet
 
 - **No network.** Nothing here opens a socket or loads weights, and a test
@@ -131,7 +182,9 @@ the default is that nobody has to.
   `not_measured` is a claim about a measurement that was attempted and found
   insufficient; nothing was attempted, so the honest output is silence. The
   comparison arrives in 3b-4.
-- **No cost estimate.** 3b-3.
+- **No remote cost estimate.** The local estimate landed in 3b-3; a remote
+  provider's token cost needs the egress opt-in of 3b-5, because the
+  calibration sample itself would transmit source text.
 
 Records whose source text is `missing` or `deleted_by_policy` have no text to
 send to any model. They are never embedded, never appear in the rebuilt store,
