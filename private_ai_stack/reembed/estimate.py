@@ -35,6 +35,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Final
 
@@ -236,7 +237,65 @@ def _local_cost(
     result["components"] = {key: str(value) for key, value in dict(result.get("components", {})).items()}
     result["source"] = f"aimeter-oss {__version__} calculate_local_inference_cost"
     result["extrapolated_latency_ms"] = round(latency_ms, 6)
+    _annotate_precision(result, profile_data if isinstance(profile_data, dict) else {}, currency)
     return result
+
+
+def _positive_rates(profile_data: dict[str, Any]) -> bool:
+    """Whether any assumption in the profile could produce a cost above zero.
+
+    This is what separates the two kinds of zero. A profile whose every rate is
+    zero says the compute is free, and its total really is nothing. A profile
+    with a positive rate and a total of zero means the duration was too short
+    for the smallest unit AIMeter prints.
+    """
+    groups = (
+        ("compute", ("gpu_hourly_cost", "cpu_hourly_cost", "memory_hourly_cost")),
+        ("energy", ("average_watts", "electricity_per_kwh")),
+    )
+    for group, keys in groups:
+        section = profile_data.get(group)
+        if not isinstance(section, dict):
+            continue
+        for key in keys:
+            try:
+                if Decimal(str(section.get(key, "0"))) > 0:
+                    return True
+            except (ArithmeticError, ValueError):
+                continue
+    return False
+
+
+def _annotate_precision(result: dict[str, Any], profile_data: dict[str, Any], currency: str) -> None:
+    """Say "below reporting precision" rather than printing a misleading zero.
+
+    Embedding a handful of short records with a hashing scheme takes
+    microseconds, so AIMeter's total rounds to ``0.000000`` and a reader could
+    take that for free. It is not free, it is smaller than the smallest unit
+    reported, and those are different claims. The bound comes from the number
+    of decimals AIMeter itself printed, so it stays correct if that precision
+    ever changes.
+
+    A genuine zero stays a zero: a profile with no positive rate at all says
+    the compute costs nothing, and there is nothing imprecise about that.
+    """
+    printed = str(result.get("total_cost", ""))
+    try:
+        if Decimal(printed) != 0:
+            return
+    except (ArithmeticError, ValueError):
+        return
+    if not _positive_rates(profile_data):
+        result["total_cost_precision"] = "exact_zero"
+        result["total_cost_detail"] = f"The profile declares no positive rate, so the cost really is 0 {currency}."
+        return
+    decimals = len(printed.partition(".")[2])
+    smallest = Decimal(1).scaleb(-decimals) if decimals else Decimal(1)
+    result["total_cost_precision"] = "below_reporting_precision"
+    result["total_cost_bound"] = f"< {smallest:f} {currency}"
+    result["total_cost_detail"] = (
+        f"The extrapolated cost is above zero but below {smallest:f} {currency}, the smallest unit AIMeter reports. It is not free."
+    )
 
 
 def _limits(calibration: Calibration | None, records_to_embed: int, cost: dict[str, Any]) -> tuple[str, ...]:
@@ -246,6 +305,11 @@ def _limits(calibration: Calibration | None, records_to_embed: int, cost: dict[s
         return tuple(limits)
     limits.append(f"Tokens and latency come from a calibration sample of {calibration.sample_size} of {records_to_embed} records.")
     limits.append("Measured latency reflects this machine under its load at the time, and is not portable to another.")
+    if cost.get("total_cost_precision") == "below_reporting_precision":
+        limits.append(
+            f"The cost is above zero but {cost.get('total_cost_bound')}, the smallest unit AIMeter reports. "
+            "It prints as zero and is not free."
+        )
     if cost.get("status") == ESTIMATED:
         limits.append(
             "Cost rests on the supplied profile's assumptions. AIMeter's own templates state that they are "

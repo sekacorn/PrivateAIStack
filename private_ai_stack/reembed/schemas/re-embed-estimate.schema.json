@@ -124,7 +124,18 @@
         "components": { "type": "object" },
         "assumptions": { "type": "string" },
         "source": { "type": "string" },
-        "extrapolated_latency_ms": { "type": "number", "minimum": 0 }
+        "extrapolated_latency_ms": { "type": "number", "minimum": 0 },
+        "total_cost_precision": {
+          "description": "Present only when total_cost prints as zero. below_reporting_precision: the cost is above zero but smaller than the smallest unit AIMeter reports, and total_cost_bound gives that bound. exact_zero: the profile declares no positive rate, so the cost really is nothing.",
+          "enum": ["below_reporting_precision", "exact_zero"]
+        },
+        "total_cost_bound": {
+          "description": "An upper bound such as \"< 0.000001 USD\", present only with below_reporting_precision.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "total_cost_detail": { "type": "string", "minLength": 1, "maxLength": 400 }
       },
       "allOf": [
         {
@@ -134,6 +145,13 @@
         {
           "if": { "properties": { "status": { "const": "estimated" } }, "required": ["status"] },
           "then": { "required": ["currency", "total_cost", "source"] }
+        },
+        {
+          "if": {
+            "properties": { "total_cost_precision": { "const": "below_reporting_precision" } },
+            "required": ["total_cost_precision"]
+          },
+          "then": { "required": ["total_cost_bound"] }
         }
       ]
     },

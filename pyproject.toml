@@ -77,8 +77,15 @@ quality = [
   "radon>=6.0",
   "yamllint>=1.35",
 ]
+# The re-embedding cost estimate delegates its money arithmetic to AIMeter and
+# never reimplements it. The range matches the AI Infrastructure Suite's, so a
+# machine with both installed resolves one version of AIMeter, not two.
+cost = [
+  "aimeter-oss>=0.2.0b1,<0.3.0",
+]
 all = [
   "agentforge-oss[pgvector,otel]>=0.5.1,<0.6.0",
+  "aimeter-oss>=0.2.0b1,<0.3.0",
   "psycopg[binary]>=3.2",
   "opentelemetry-api>=1.26",
   "opentelemetry-sdk>=1.26",
@@ -202,10 +209,11 @@ strict = true
 warn_unused_ignores = true
 exclude = ["tests/fixtures", "sample-target"]
 
-# aimeter-oss is deliberately not a dependency: the re-embedding cost estimate
-# delegates its money arithmetic to AIMeter when an operator has it installed,
-# and otherwise says so rather than reimplementing it. The import is guarded by
-# try/except ImportError, so a missing stub here is the expected state.
+# aimeter-oss is deliberately optional, behind the [cost] extra: the
+# re-embedding cost estimate delegates its money arithmetic to AIMeter when an
+# operator has it installed, and otherwise says so rather than reimplementing
+# it. The import is guarded by try/except ImportError, so a missing stub here is
+# the expected state for an install without that extra.
 [[tool.mypy.overrides]]
 module = ["ai_meter.*", "ai_meter"]
 ignore_missing_imports = true
