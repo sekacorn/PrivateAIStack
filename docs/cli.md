@@ -79,13 +79,29 @@ privateaistack reembed run ./evidence/embedding-portability.json   --source-stor
 | `--dimensions` | Target model dimensions. **Never defaulted**, because model identity is the triple id + revision + dimensions and the same scheme at two dimensions is two models. |
 | `--availability` | `open_weight_self_hostable` or `vendor_only`. An operator attestation no offline check can confirm, so it has no default either. |
 | `--batch-size` | Records per batch and per shard. Default 64. |
-| `--hosting-mode` | Declared executor location, `local` or `hosted`; not an isolation claim. |
-| `--provider` | External executor identifier. |
-| `--endpoint` | Declared endpoint; actual external routing remains attested. |
-| `--allow-external` | Explicit consent to invoke an injected executor. |
-| `--allow-hosted` | Additional consent for hosted execution. |
-| `--data-classification` | Operator-attested classification. Hosted `unknown`, `confidential`, and `restricted` data is blocked. |
-| `--telemetry-enabled` | Records external provider telemetry as an attested warning. |
+
+The egress options below decide whether anything may leave this machine. Every
+default is the safe one, so a command that omits all of them cannot send
+anything:
+
+| Option | Default | Means |
+|---|---|---|
+| `--hosting-mode` | `local` | Declared executor location, `local` or `hosted`. **Not an isolation claim**: `local` means no socket is opened by package code, not that injected code cannot open one. |
+| `--provider` | none | External executor identifier. Required for, and only for, an external executor; naming one on a registry-owned run is refused. |
+| `--endpoint` | none | Declared endpoint. Normalised to an origin and validated, but an injected executor can ignore it, so actual routing stays attested. |
+| `--allow-external` | **off** | Explicit consent to invoke an injected executor. Without it the run is refused before the evidence document is opened. |
+| `--allow-hosted` | **off** | Additional consent for hosted execution. Both consents are needed for a hosted run; neither implies the other. |
+| `--data-classification` | `unknown` | Operator-attested classification. Hosted `unknown`, `confidential` and `restricted` data is blocked, so the default is the blocking one. |
+| `--telemetry-enabled` | off | Records external provider telemetry as an attested warning. Warned about even on a local run. |
+
+There is no `--redaction-applied`: no redaction transform exists, so nothing
+may claim one. There are no proxy or redirect options for the same reason —
+a declaration this package cannot enforce would read as a control.
+
+This package ships no hosted provider, so an allowed external run needs an
+embedder supplied in code and exits `2` from the CLI with a message saying so.
+[re-embedding.md](re-embedding.md) has the full `egress` block, the trust
+boundaries, and why a submission count is never a delivery count.
 
 Re-running the same command against the same target directory resumes an
 interrupted run rather than starting over, and reports `resumed: true`. A batch
