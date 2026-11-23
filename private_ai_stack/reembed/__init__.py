@@ -7,8 +7,12 @@ batches, and writes both the rebuilt store and a ``re-embed-record.v1``
 describing the run.
 
 Nothing here opens a socket or loads weights. Remote providers arrive in 3b-5
-behind an explicit opt-in, and the retrieval-quality comparison in 3b-4, so a
-record written today carries no quality claim at all rather than an empty one.
+behind an explicit opt-in.
+
+:func:`compare_stores` answers the question that follows the rebuild: do the
+two stores still put the same records near each other? It reports neighborhood
+agreement, never search quality, and a comparison over an operator-chosen query
+set is reported in full and moves no lock-in score.
 
 Before committing to a run an operator can ask what it will cost:
 :func:`estimate_re_embed` embeds a small calibration sample, measures it, and
@@ -38,14 +42,40 @@ from private_ai_stack.reembed.estimate import (
 )
 from private_ai_stack.reembed.evidence import EvidenceError, SourceRecord, SourceStore, load_source_store
 from private_ai_stack.reembed.pipeline import DEFAULT_BATCH_SIZE, ReEmbedError, ReEmbedOutcome, re_embed_store
+from private_ai_stack.reembed.quality import (
+    DEFAULT_ANCHOR_COUNT,
+    DEFAULT_CANDIDATE_POOL,
+    DEFAULT_MINIMUM_SAMPLE_SIZE,
+    DEFAULT_SEED,
+    DEFAULT_TOP_K,
+    QUERY_SET_SCHEMA_VERSION,
+    SEEDED_RANDOM,
+    QualityError,
+    QualityResult,
+    QualityThresholds,
+    QuerySet,
+    VectorStore,
+    attach_quality,
+    compare_stores,
+    draw_anchors,
+    load_query_set,
+    load_vector_store,
+)
 
 __all__ = [
     "AGENTFORGE_HASHED_BOW",
     "BUILT_IN_MODEL_IDS",
+    "DEFAULT_ANCHOR_COUNT",
     "DEFAULT_BATCH_SIZE",
+    "DEFAULT_CANDIDATE_POOL",
+    "DEFAULT_MINIMUM_SAMPLE_SIZE",
     "DEFAULT_SAMPLE_SEED",
     "DEFAULT_SAMPLE_SIZE",
+    "DEFAULT_SEED",
+    "DEFAULT_TOP_K",
     "PRIVATEAISTACK_HASHED_BOW",
+    "QUERY_SET_SCHEMA_VERSION",
+    "SEEDED_RANDOM",
     "Calibration",
     "Checkpoint",
     "CheckpointError",
@@ -54,15 +84,25 @@ __all__ = [
     "EstimateError",
     "EvidenceError",
     "ModelIdentity",
+    "QualityError",
+    "QualityResult",
+    "QualityThresholds",
+    "QuerySet",
     "ReEmbedError",
     "ReEmbedEstimate",
     "ReEmbedOutcome",
     "SourceRecord",
     "SourceStore",
+    "VectorStore",
+    "attach_quality",
     "build_built_in_embedder",
+    "compare_stores",
+    "draw_anchors",
     "estimate_re_embed",
     "load_checkpoint",
     "load_cost_profile",
+    "load_query_set",
     "load_source_store",
+    "load_vector_store",
     "re_embed_store",
 ]

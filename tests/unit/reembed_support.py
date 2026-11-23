@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +101,71 @@ def build_source_store(
                     "availability_verification": "attested",
                 },
                 "vectors": vectors,
+            }
+        ],
+    }
+    return write_document(directory, document)
+
+
+def build_ranked_store(
+    directory: Path,
+    *,
+    store_id: str = "old-store",
+    model_id: str = "agentforge.hashed-bow.blake2b",
+    revision: str = "1",
+    dimensions: int = 64,
+    count: int = 40,
+    text: Callable[[int], str] | None = None,
+) -> Path:
+    """Write a store whose vectors are real, so a quality comparison can rank it.
+
+    :func:`build_source_store` writes placeholder vector digests because the
+    pipeline only ever reads source text. The comparison reads the vectors
+    themselves and checks every digest, so it needs a store that was actually
+    embedded.
+    """
+    from private_ai_stack.reembed.embedders import ModelIdentity, build_built_in_embedder
+
+    embedder = build_built_in_embedder(ModelIdentity(id=model_id, revision=revision, dimensions=dimensions))
+    body = text if text is not None else (lambda index: f"record {index} about topic {index % 7} and shared vocabulary")
+    (directory / "sources").mkdir(parents=True, exist_ok=True)
+    (directory / "vectors").mkdir(parents=True, exist_ok=True)
+    entries: list[dict[str, Any]] = []
+    lines: list[str] = []
+    for index in range(count):
+        record_id = f"r{index:04d}"
+        payload = body(index).encode("utf-8")
+        relative = f"sources/record-{index:04d}.txt"
+        (directory / relative).write_bytes(payload)
+        digest = hashlib.sha256(payload).hexdigest()
+        entries.append({"record_id": record_id, "source_text": {"status": RETAINED, "path": relative, "sha256": digest}})
+        values = embedder.embed(payload.decode("utf-8"))
+        lines.append(json.dumps({"record_id": record_id, "source_text_sha256": digest, "values": values}))
+    shard = ("\n".join(lines) + "\n").encode("utf-8")
+    (directory / "vectors/shard-0000.jsonl").write_bytes(shard)
+    document = {
+        "schema_version": "embedding-portability.v1",
+        "stores": [
+            {
+                "store_id": store_id,
+                "embedding_model": {
+                    "id": model_id,
+                    "revision": revision,
+                    "dimensions": dimensions,
+                    "availability": "open_weight_self_hostable",
+                    "availability_verification": "attested",
+                },
+                "vectors": {
+                    "layout": "sharded_jsonl",
+                    "shards": [
+                        {
+                            "path": "vectors/shard-0000.jsonl",
+                            "sha256": hashlib.sha256(shard).hexdigest(),
+                            "record_count": count,
+                        }
+                    ],
+                    "source_text": entries,
+                },
             }
         ],
     }

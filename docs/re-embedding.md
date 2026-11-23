@@ -194,16 +194,123 @@ carries no digest of itself, and it is deliberately not reproducible: measured
 latency depends on the machine and its load at the time. Only the counts in it
 are stable.
 
+## Comparing retrieval before and after
+
+Rebuilding answers "can this be rebuilt?". `reembed quality` answers the
+question that follows: do the two stores still put the same records near each
+other?
+
+```
+privateaistack reembed quality before/embedding-portability.json after/embedding-portability.json   --before-store old-store --after-store new-store   --top-k 10 --min-top-k-overlap 0.7   --record after/re-embed-record.json
+```
+
+### It measures neighborhood agreement, not search quality
+
+The default mode is `record_anchored`: a drawn record's own stored vector is
+the query in both stores. That is not a shortcut. Ranking the *old* store for a
+free-text query means embedding that query with the *old* model, which at a
+lock-in score of 50 is exactly the model you no longer have. An anchor needs no
+model at query time, so the comparison works in the case the whole phase exists
+for.
+
+The price is what the numbers mean. They say the two stores place the same
+records near each other. They say **nothing** about whether a person searching
+either store finds what they wanted. The record carries
+`metric_basis: neighborhood_agreement` so no reader has to infer it, and the AI
+Infrastructure Suite refuses a record-anchored result that claims otherwise.
+
+An anchor is excluded from its own candidate list. It is its own nearest
+neighbour in both stores, so leaving it in would add one guaranteed agreement
+to every single query and quietly lift every overlap.
+
+`text` mode embeds free-text queries with each store's own model. It needs both
+model identities to be built-in schemes this package implements, because that
+is the only case where the old model can be re-run offline. With
+`expected_records` it measures relevance and reports
+`metric_basis: retrieval_relevance`; without them it is agreement again.
+
+### The metrics
+
+| Metric | Means |
+|---|---|
+| `top_k_overlap` | Mean share of the old top-k that is still in the new top-k. A share of the candidate pool, not of the whole store. |
+| `rank_correlation` | Mean Spearman correlation over the candidate pool, with tied similarities taking averaged ranks. |
+| `hit_rate`, `hit_rate_before` | Share of queries whose expected records appear in the top-k. Text mode with expected records only. |
+| `mrr`, `mrr_before` | Mean reciprocal rank of the first expected record. Text mode with expected records only. |
+
+### Who chose the queries decides whether a score may move
+
+| `anchor_selection` | Where the set came from | Reports | Can move 50 → 25 |
+|---|---|---|---|
+| `seeded_random` | Drawn by this tool from `--anchor-seed`, which is recorded | In full | Yes, when every other condition holds |
+| `operator` | A `golden-query-set.v1` file you supplied | In full | Never |
+
+A file is always `operator`, whatever it says about itself: the file is what
+you chose to hand over. An operator who may pick the queries may pick the
+result, and no offline check can tell a fair hand-picked set from a flattering
+one, so a hand-picked set is reported with its full label, metrics and checks
+and moves nothing. The suite reads the same rule from the record rather than
+trusting this tool to have applied it.
+
+### You declare the thresholds
+
+There are no built-in agreement floors, and a run that would produce no metric
+check at all is **refused** rather than reported. Declare
+`--min-top-k-overlap`, `--min-rank-correlation`, or supply `expected_records`
+so the hit-rate and MRR drop caps apply. A floor this package invented would be
+a bar nobody set, and a verdict against it would be this tool's opinion in your
+voice.
+
+The bar travels with the verdict. Every declared threshold is written into the
+record's `thresholds` and listed among the suite's `attested_claims`, so no
+reader sees `sampled` without seeing what was cleared. `minimum_sample_size`
+defaults to 20, the same number ModelSwapBench uses, so a calibration done for
+one is not wasted on the other.
+
+### Ties, empty sets and other awkward cases
+
+| Situation | What happens |
+|---|---|
+| Equal similarities | Ordered by ascending `record_id`, recorded in `tie_break`, so a reader can tell a tie from a disagreement. |
+| The top-k boundary falls inside a tie | Counted in `boundary_ties`. Membership there was decided by the tie break, not by the vectors. |
+| Every candidate tied for a query | Rank correlation is undefined for it, `correlation_undefined` is set, and no 0 is invented. A 0 would read as disagreement rather than as absence. |
+| No query could be evaluated | `not_measured`, no metrics, and a note saying it is not a passing result. |
+| Fewer queries than `--min-sample-size` | `not_measured` with `sufficient_evidence: false`. The comparison ran; it is not reported as a measurement. |
+| An anchor absent from either store | Counted in `queries_skipped`, not fatal. |
+| `--top-k` larger than the pool | The effective k is smaller and `top_k_capped` is set. |
+| The two stores share no record identifiers | Refused. Comparing neighborhoods across different populations gives a meaningless number, not a low one. |
+
+### Bounds
+
+Every query is ranked against a **candidate pool** rather than the whole store,
+drawn by the same seed and defaulting to 256 records. Every anchor is kept in
+the pool whatever the draw says, so an anchor is never missing from the pool it
+is ranked inside. The pool size is written into the record, because an overlap
+over 256 drawn records is a different claim from an overlap over the whole
+store.
+
+Vectors are held as packed doubles, capped at eight million values per store
+(64 MiB, 128 MiB for both), and a comparison that would need more than 200
+million multiplications is refused with a message rather than attempted. All of
+this is so a run stays inside a 16 GB machine beside everything else.
+
+### Reading the result needs a current suite
+
+The fields beyond `status`, `query_set_size` and `top_k` are additive within
+`re-embed-record.v1`, so the version does not change, but the suite's quality
+block refuses unknown fields. Reading a record this command writes needs
+**ai-infrastructure-suite 0.1.0b3 or later**.
+
 ## What this does not do yet
 
 - **No network.** Nothing here opens a socket or loads weights, and a test
   asserts it. Remote providers arrive in 3b-5 behind an explicit opt-in. The
   `egress` block is written now, always, so a later remote run has nowhere to
   hide: a reader cannot mistake a missing block for a local run.
-- **No quality claim.** A record written today has no `quality` block at all.
-  `not_measured` is a claim about a measurement that was attempted and found
-  insufficient; nothing was attempted, so the honest output is silence. The
-  comparison arrives in 3b-4.
+- **No quality claim from `reembed run`.** A record `run` writes has no
+  `quality` block at all. `not_measured` is a claim about a measurement that
+  was attempted and found insufficient; `run` attempts nothing, so the honest
+  output is silence. `reembed quality` adds the block when it is asked to.
 - **No remote cost estimate.** The local estimate landed in 3b-3; a remote
   provider's token cost needs the egress opt-in of 3b-5, because the
   calibration sample itself would transmit source text.

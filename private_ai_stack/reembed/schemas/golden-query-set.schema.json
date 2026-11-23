@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sekacorn/PrivateAIStack/schemas/golden-query-set.schema.json",
+  "title": "golden-query-set.v1",
+  "description": "An operator-supplied set of queries for comparing a store with its re-embedded rebuild. A set read from a file is always operator-selected, whatever it says about itself, so a comparison run against it reports in full and can never move a lock-in score. Only a set this tool drew by seed can do that, and such a set is never written to a file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mode"],
+  "properties": {
+    "schema_version": { "const": "golden-query-set.v1" },
+    "mode": {
+      "description": "record_anchored: each named record's own stored vector is the query in both stores, so neither model is needed at query time. text: free-text queries embedded by each store's own model, which needs both models to be built-in schemes this package implements.",
+      "enum": ["record_anchored", "text"]
+    },
+    "description": {
+      "description": "Free text for the operator's own use. Never read as a claim about the set.",
+      "type": "string",
+      "maxLength": 1024
+    },
+    "anchors": {
+      "description": "Record identifiers, for record_anchored mode only. An identifier absent from either store is counted in queries_skipped rather than failing the run.",
+      "type": "array",
+      "maxItems": 1000,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/identifier" }
+    },
+    "queries": {
+      "description": "Free-text queries, for text mode only.",
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "expected_records": {
+            "description": "The records this query should retrieve. Operator-declared, so hit rate and MRR computed from them are attested in exactly the way the set is. When every query omits them the comparison is agreement only.",
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/identifier" }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "record_anchored" } }, "required": ["mode"] },
+      "then": { "required": ["anchors"], "not": { "required": ["queries"] } }
+    },
+    {
+      "if": { "properties": { "mode": { "const": "text" } }, "required": ["mode"] },
+      "then": { "required": ["queries"], "not": { "required": ["anchors"] } }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    }
+  }
+}
