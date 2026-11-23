@@ -1,0 +1,56 @@
+name: Suite Contract
+
+# PrivateAIStack and the AI Infrastructure Suite take no code dependency on
+# each other; the contract between them is the re-embed-record.v1 document.
+# Nothing else checks that contract, which is how this package came to emit
+# twenty-one egress fields against a reader that knew ten, with every record it
+# produced rejected and the whole matrix still green.
+#
+# This lives in its own workflow rather than in ci.yml so it can carry a
+# schedule without putting the rest of the matrix on one. The job name is the
+# status-check context, so it stays `suite-contract` either way.
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  # The suite is a separate repository on a separate release cadence, so a
+  # change there can break this contract without anything happening here. A
+  # nightly run means that surfaces within a day instead of whenever somebody
+  # next opens a pull request.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]" jsonschema
+      - name: Install the suite from its main branch
+        # Not a declared dependency of this package: a runtime dependency on
+        # the suite would invert the layering. It is installed for this job
+        # only, and the contract tests skip when it is absent so the offline
+        # matrix stays offline.
+        run: |
+          python -m pip install "git+https://github.com/sekacorn/AI-Infrastructure-Suite.git@main"
+          python -c "import ai_infrastructure_suite as s; print('suite', s.__version__)"
+      - name: Validate every emitted record against the suite
+        # PRIVATEAISTACK_REQUIRE_SUITE_CONTRACT turns a missing suite into a
+        # failure. Without it a botched install above would skip every test and
+        # report this required check as passing, which is the one outcome a
+        # contract gate must never produce.
+        #
+        # --no-cov: this job runs one directory, so the project's 80% coverage
+        # gate does not apply to it. Coverage is enforced by the `test` matrix.
+        env:
+          PRIVATEAISTACK_REQUIRE_SUITE_CONTRACT: "1"
+        run: python -m pytest -v --no-cov tests/contract
