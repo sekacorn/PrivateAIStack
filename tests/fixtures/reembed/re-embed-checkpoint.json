@@ -1,0 +1,32 @@
+{
+  "schema_version": "re-embed-checkpoint.v1",
+  "source_store_id": "support-memory",
+  "source_evidence_sha256": "08494bd87f1519146d0d6b303d64d257cba9367e58a5cd10414bae0341f8aea0",
+  "target_store_id": "support-memory-rebuilt",
+  "target_model": {
+    "id": "privateaistack.hashed-bow.sha256-signed",
+    "revision": "1",
+    "dimensions": 16
+  },
+  "batch_size": 2,
+  "batches": [
+    {
+      "index": 0,
+      "shard_path": "vectors/shard-0000.jsonl",
+      "shard_sha256": "1888c4960a18fcf79f22b477c07471578982800f60a2142ea3136fba15bc03ad",
+      "record_ids": [
+        "record-000",
+        "record-001"
+      ]
+    },
+    {
+      "index": 1,
+      "shard_path": "vectors/shard-0001.jsonl",
+      "shard_sha256": "39db5469145b0bfcebd8a1de0357588b3b888ee0ab753e85f61431589c8d7bf1",
+      "record_ids": [
+        "record-002",
+        "record-003"
+      ]
+    }
+  ]
+}
