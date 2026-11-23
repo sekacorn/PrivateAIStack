@@ -202,6 +202,14 @@ strict = true
 warn_unused_ignores = true
 exclude = ["tests/fixtures", "sample-target"]
 
+# aimeter-oss is deliberately not a dependency: the re-embedding cost estimate
+# delegates its money arithmetic to AIMeter when an operator has it installed,
+# and otherwise says so rather than reimplementing it. The import is guarded by
+# try/except ImportError, so a missing stub here is the expected state.
+[[tool.mypy.overrides]]
+module = ["ai_meter.*", "ai_meter"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "--cov=private_ai_stack --cov-report=term-missing --cov-report=xml"
 testpaths = ["tests"]

@@ -1,0 +1,47 @@
+{
+  "schema_version": "re-embed-estimate.v1",
+  "source_store": {
+    "store_id": "support-memory",
+    "store_evidence_sha256": "733bef2a9ba399180a3288bc3f0e02788f1d32aa27551043d053e998893aacff"
+  },
+  "target_model": {
+    "id": "privateaistack.hashed-bow.sha256-signed",
+    "revision": "1",
+    "dimensions": 16
+  },
+  "records_to_embed": 5,
+  "records_skipped": {
+    "missing": 1,
+    "deleted_by_policy": 1
+  },
+  "calibration": {
+    "sample_size": 2,
+    "sample_selection": "sha256(seed + colon + record_id) ascending",
+    "sample_seed": "re-embed-estimate",
+    "tokenizer": "privateaistack.hashed-bow.sha256-signed@1",
+    "measured_tokens": 20,
+    "measured_source_bytes": 120,
+    "measured_latency_ms": 0.0564,
+    "tokens_per_record": 10.0,
+    "latency_ms_per_record": 0.0282
+  },
+  "projection": {
+    "status": "estimated",
+    "estimated_tokens": 50,
+    "estimated_latency_ms": 0.141
+  },
+  "cost": {
+    "status": "not_estimated",
+    "reason": "No local cost profile was supplied."
+  },
+  "egress": {
+    "remote_provider_used": false,
+    "records_transmitted": 0,
+    "raw_source_text_transmitted": false
+  },
+  "limits": [
+    "records_to_embed is exact; every other figure is extrapolated and is not a quotation.",
+    "Tokens and latency come from a calibration sample of 2 of 5 records.",
+    "Measured latency reflects this machine under its load at the time, and is not portable to another."
+  ]
+}
