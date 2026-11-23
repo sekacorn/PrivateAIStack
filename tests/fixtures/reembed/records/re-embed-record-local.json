@@ -1,0 +1,47 @@
+{
+  "schema_version": "re-embed-record.v1",
+  "source_store": {
+    "store_id": "support-memory",
+    "store_evidence_sha256": "6eac6c60f2a6d1ea5cfd6f9825238046a6f79d6276e5790cd540dcdb9ab2ab34"
+  },
+  "target_store": {
+    "store_id": "support-memory-rebuilt",
+    "store_evidence_sha256": "9dcba7d5a2fc4bdd1826454582229315a88fd2209fdc38b973537d325c27d16e"
+  },
+  "target_model": {
+    "id": "privateaistack.hashed-bow.sha256-signed",
+    "revision": "1",
+    "dimensions": 8,
+    "availability": "open_weight_self_hostable",
+    "availability_verification": "attested"
+  },
+  "batch_log": {
+    "batch_size": 64,
+    "batches_completed": 1,
+    "records_embedded": 3,
+    "resumed": false,
+    "checkpoint_sha256": "f0aa36d3db74e739aad23b543da659e779537885d8306e3802519da5d35a2460"
+  },
+  "coverage": {
+    "total_records": 5,
+    "retained_rebuilt": 3,
+    "missing_skipped": 1,
+    "deleted_by_policy_skipped": 1,
+    "failed": 0
+  },
+  "egress": {
+    "executor_kind": "local_builtin",
+    "execution_verification": "registry_owned",
+    "remote_provider_used": false,
+    "records_transmitted": 0,
+    "transmission_basis": "no_transmission",
+    "records_submitted_to_external_executor": 0,
+    "raw_source_text_transmitted": false,
+    "hosting_mode": "local",
+    "external_execution_confirmed": false,
+    "hosted_execution_confirmed": false,
+    "dataset_privacy_classification": "unknown",
+    "redaction_applied": false,
+    "telemetry_enabled": false
+  }
+}

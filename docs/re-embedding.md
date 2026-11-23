@@ -391,6 +391,36 @@ Nothing in a written record can say a provider received a record. The operator
 is also warned before the run: `records handed to an external executor are not
 confirmed delivered to any provider`.
 
+#### The suite has to be able to read this
+
+PrivateAIStack and the AI Infrastructure Suite take no code dependency on each
+other. The contract between them is the `re-embed-record.v1` document, and
+nothing used to check it: this package came to emit twenty-one egress fields
+against a reader that knew ten, so every record it wrote was rejected outright
+and no test noticed.
+
+The `suite-contract` CI job closes that. It installs the suite from its `main`
+branch and validates **every** record variant this package emits — registry
+owned, external-local and hosted — through both the suite's reader and its
+shipped JSON Schema, failing on any field the installed suite does not know.
+Both halves are checked because they fail differently: the reader enforces
+cross-field consistency a schema cannot express, and the schema enforces the
+field inventory through `additionalProperties: false`.
+
+The job also asserts that an injected unknown field *is* refused by both, so a
+pass means the check still has teeth rather than that it has quietly stopped
+looking.
+
+The suite is not a declared dependency of this package — that would invert the
+layering — so `tests/contract` skips when it is absent and the offline matrix
+stays offline. Run it locally with:
+
+```
+pip install -e ".[dev]" jsonschema
+pip install "git+https://github.com/sekacorn/AI-Infrastructure-Suite.git@main"
+pytest --no-cov tests/contract
+```
+
 #### Resume binding
 
 Checkpoints are bound to the executor kind, provider, endpoint origin,

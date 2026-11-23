@@ -1,0 +1,59 @@
+{
+  "schema_version": "re-embed-record.v1",
+  "source_store": {
+    "store_id": "support-memory",
+    "store_evidence_sha256": "6eac6c60f2a6d1ea5cfd6f9825238046a6f79d6276e5790cd540dcdb9ab2ab34"
+  },
+  "target_store": {
+    "store_id": "support-memory-rebuilt",
+    "store_evidence_sha256": "9dcba7d5a2fc4bdd1826454582229315a88fd2209fdc38b973537d325c27d16e"
+  },
+  "target_model": {
+    "id": "privateaistack.hashed-bow.sha256-signed",
+    "revision": "1",
+    "dimensions": 8,
+    "availability": "open_weight_self_hostable",
+    "availability_verification": "attested"
+  },
+  "batch_log": {
+    "batch_size": 64,
+    "batches_completed": 1,
+    "records_embedded": 3,
+    "resumed": false,
+    "checkpoint_sha256": "910750cc5f3bbb533213c7ef060f7e6fcefe9f6c6e7053f1616c7824d1f4ee41"
+  },
+  "coverage": {
+    "total_records": 5,
+    "retained_rebuilt": 3,
+    "missing_skipped": 1,
+    "deleted_by_policy_skipped": 1,
+    "failed": 0
+  },
+  "egress": {
+    "executor_kind": "external_unverified",
+    "execution_verification": "attested",
+    "remote_provider_used": true,
+    "records_transmitted": 3,
+    "transmission_basis": "handed_to_executor",
+    "records_submitted_to_external_executor": 3,
+    "raw_source_text_transmitted": true,
+    "hosting_mode": "hosted",
+    "external_execution_confirmed": true,
+    "hosted_execution_confirmed": true,
+    "dataset_privacy_classification": "public",
+    "redaction_applied": false,
+    "telemetry_enabled": true,
+    "executor_id": "example-hosted",
+    "endpoint_origin": "https://embeddings.example",
+    "network_behavior_verification": "attested",
+    "transmission_accounting": "distinct_records_in_completed_batches",
+    "transmission_attempts_may_exceed_count": true,
+    "delivery_verification": "unverified",
+    "provider": "example-hosted",
+    "warnings": [
+      "external executor network behaviour is operator-attested and unverified",
+      "records handed to an external executor are not confirmed delivered to any provider",
+      "telemetry is enabled; review exported fields before execution"
+    ]
+  }
+}
