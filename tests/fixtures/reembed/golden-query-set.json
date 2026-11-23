@@ -1,0 +1,6 @@
+{
+  "schema_version": "golden-query-set.v1",
+  "mode": "record_anchored",
+  "description": "Anchors an operator picked by hand. Reported in full; never moves a score.",
+  "anchors": ["r0000", "r0003", "r0007", "r0011", "r0019"]
+}

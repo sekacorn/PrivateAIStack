@@ -1,15 +1,16 @@
-"""The ``privateaistack reembed run`` command, including ``--estimate-only``."""
+"""The ``privateaistack reembed`` commands: ``run``, ``--estimate-only`` and ``quality``."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
 
 from private_ai_stack.cli.main import app
-from tests.unit.reembed_support import build_source_store
+from tests.unit.reembed_support import build_ranked_store, build_source_store
 
 runner = CliRunner()
 
@@ -136,3 +137,153 @@ def test_the_command_is_discoverable(source: Path) -> None:
     result = runner.invoke(app, ["reembed", "--help"])
     assert result.exit_code == 0
     assert "run" in result.output
+
+
+# --- reembed quality --------------------------------------------------------
+
+
+@pytest.fixture
+def ranked(tmp_path: Path) -> tuple[Path, Path]:
+    """An original store and its rebuild, both with real vectors on disk."""
+    before = build_ranked_store(tmp_path / "before")
+    result = runner.invoke(
+        app,
+        [
+            "reembed",
+            "run",
+            str(before),
+            "--source-store",
+            "old-store",
+            "--target-directory",
+            str(tmp_path / "after"),
+            "--target-store",
+            "new-store",
+            "--model-id",
+            "privateaistack.hashed-bow.sha256-signed",
+            "--model-revision",
+            "1",
+            "--dimensions",
+            "64",
+            "--availability",
+            "open_weight_self_hostable",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return before, tmp_path / "after" / "embedding-portability.json"
+
+
+def _quality(before: Path, after: Path, *extra: str) -> Any:
+    return runner.invoke(
+        app,
+        [
+            "reembed",
+            "quality",
+            str(before),
+            str(after),
+            "--before-store",
+            "old-store",
+            "--after-store",
+            "new-store",
+            *extra,
+        ],
+    )
+
+
+def test_the_quality_command_reports_a_seeded_record_anchored_comparison(ranked: tuple[Path, Path]) -> None:
+    before, after = ranked
+
+    result = _quality(before, after, "--top-k", "5", "--min-top-k-overlap", "0.1", "--anchors", "24")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "sampled"
+    assert payload["anchor_selection"] == "seeded_random"
+    assert payload["metric_basis"] == "neighborhood_agreement"
+    assert payload["measures_user_search_quality"] is False
+    assert payload["moves_lock_in_score"] is True
+
+
+def test_an_operator_query_set_is_reported_as_moving_no_score(ranked: tuple[Path, Path], tmp_path: Path) -> None:
+    before, after = ranked
+    query_set = tmp_path / "set.json"
+    query_set.write_text(
+        json.dumps(
+            {
+                "schema_version": "golden-query-set.v1",
+                "mode": "record_anchored",
+                "anchors": [f"r{index:04d}" for index in range(24)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _quality(before, after, "--query-set", str(query_set), "--top-k", "5", "--min-top-k-overlap", "0.1")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["anchor_selection"] == "operator"
+    assert payload["moves_lock_in_score"] is False
+    assert "anchor_seed" not in payload
+
+
+def test_the_quality_command_needs_a_declared_floor(ranked: tuple[Path, Path]) -> None:
+    before, after = ranked
+
+    result = _quality(before, after, "--top-k", "5", "--anchors", "24")
+
+    assert result.exit_code == 2
+    assert "No metric threshold was declared" in result.output
+
+
+def test_an_empty_draw_reports_not_measured_rather_than_failing(ranked: tuple[Path, Path]) -> None:
+    before, after = ranked
+
+    result = _quality(before, after, "--anchors", "0", "--min-top-k-overlap", "0.1")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "not_measured"
+    assert payload["moves_lock_in_score"] is False
+
+
+def test_the_quality_command_writes_into_the_re_embed_record(ranked: tuple[Path, Path], tmp_path: Path) -> None:
+    before, after = ranked
+    record = tmp_path / "after" / "re-embed-record.json"
+
+    result = _quality(before, after, "--top-k", "5", "--min-top-k-overlap", "0.1", "--anchors", "24", "--record", str(record))
+
+    assert result.exit_code == 0, result.output
+    document = json.loads(record.read_text(encoding="utf-8"))
+    assert document["quality"]["status"] == "sampled"
+    assert document["quality"]["anchor_seed"] == "re-embed-quality"
+
+
+def test_an_unknown_store_exits_two(ranked: tuple[Path, Path]) -> None:
+    before, after = ranked
+
+    result = _quality(before, after, "--min-top-k-overlap", "0.1")
+    assert result.exit_code == 0
+
+    bad = runner.invoke(
+        app,
+        [
+            "reembed",
+            "quality",
+            str(before),
+            str(after),
+            "--before-store",
+            "nosuchstore",
+            "--after-store",
+            "new-store",
+            "--min-top-k-overlap",
+            "0.1",
+        ],
+    )
+    assert bad.exit_code == 2
+
+
+def test_the_quality_command_is_discoverable() -> None:
+    result = runner.invoke(app, ["reembed", "--help"])
+
+    assert result.exit_code == 0
+    assert "quality" in result.output

@@ -19,17 +19,30 @@ from private_ai_stack import __version__
 from private_ai_stack.audit.writer import AuditWriter
 from private_ai_stack.reembed import (
     BUILT_IN_MODEL_IDS,
+    DEFAULT_ANCHOR_COUNT,
     DEFAULT_BATCH_SIZE,
+    DEFAULT_CANDIDATE_POOL,
+    DEFAULT_MINIMUM_SAMPLE_SIZE,
     DEFAULT_SAMPLE_SEED,
     DEFAULT_SAMPLE_SIZE,
+    DEFAULT_SEED,
+    DEFAULT_TOP_K,
+    SEEDED_RANDOM,
     CheckpointError,
     EmbedderError,
     EstimateError,
     EvidenceError,
     ModelIdentity,
+    QualityError,
+    QualityThresholds,
     ReEmbedError,
+    attach_quality,
+    compare_stores,
+    draw_anchors,
     estimate_re_embed,
     load_cost_profile,
+    load_query_set,
+    load_vector_store,
     re_embed_store,
 )
 
@@ -687,6 +700,87 @@ def reembed_run(
             }
         )
     except (EstimateError, EmbedderError, EvidenceError, ReEmbedError, CheckpointError) as exc:
+        handle_error(CliError(str(exc), INVALID_INPUT), verbose)
+    except Exception as exc:
+        handle_error(exc, verbose)
+
+
+@reembed_app.command("quality")
+def reembed_quality(
+    before_document: Annotated[Path, typer.Argument(help="The original store's embedding-portability.v1 document.")],
+    after_document: Annotated[Path, typer.Argument(help="The rebuilt store's embedding-portability.v1 document.")],
+    before_store_id: Annotated[str, typer.Option("--before-store", help="Which store in the first document.")],
+    after_store_id: Annotated[str, typer.Option("--after-store", help="Which store in the second document.")],
+    query_set: Annotated[
+        Path | None,
+        typer.Option(
+            "--query-set",
+            help="A golden-query-set.v1 document. Operator-chosen, so the result reports in full and moves no score.",
+        ),
+    ] = None,
+    anchors: Annotated[
+        int,
+        typer.Option("--anchors", help="How many anchors to draw by seed when no query set is supplied."),
+    ] = DEFAULT_ANCHOR_COUNT,
+    anchor_seed: Annotated[str, typer.Option("--anchor-seed", help="Seed for the draw, recorded in the result.")] = DEFAULT_SEED,
+    top_k: Annotated[int, typer.Option("--top-k", help="How many neighbours each ranking keeps.")] = DEFAULT_TOP_K,
+    candidate_pool: Annotated[
+        int, typer.Option("--candidate-pool", help="How many records each query is ranked against.")
+    ] = DEFAULT_CANDIDATE_POOL,
+    minimum_sample_size: Annotated[
+        int, typer.Option("--min-sample-size", help="Below this many evaluated queries the result is not_measured.")
+    ] = DEFAULT_MINIMUM_SAMPLE_SIZE,
+    minimum_top_k_overlap: Annotated[
+        float | None, typer.Option("--min-top-k-overlap", help="Agreement floor. This package ships no default.")
+    ] = None,
+    minimum_rank_correlation: Annotated[
+        float | None, typer.Option("--min-rank-correlation", help="Agreement floor. This package ships no default.")
+    ] = None,
+    record: Annotated[
+        Path | None,
+        typer.Option("--record", help="A re-embed-record.v1 to write the quality block into, replacing any earlier one."),
+    ] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show raw exceptions.")] = False,
+) -> None:
+    """Compare what two stores put near each other, before and after a rebuild.
+
+    The default is record-anchored: each drawn record's own stored vector is
+    the query in both stores, so neither model has to be run. What that
+    measures is neighborhood agreement, never search quality.
+
+    At least one of ``--min-top-k-overlap`` and ``--min-rank-correlation`` is
+    needed for a verdict. Nothing here supplies a floor of its own: an operator
+    says what acceptable means before asking whether it was met.
+    """
+    try:
+        thresholds = QualityThresholds(
+            top_k=top_k,
+            minimum_sample_size=minimum_sample_size,
+            minimum_top_k_overlap=minimum_top_k_overlap,
+            minimum_rank_correlation=minimum_rank_correlation,
+        )
+        before = load_vector_store(before_document.expanduser().resolve(), before_store_id)
+        after = load_vector_store(after_document.expanduser().resolve(), after_store_id)
+        if query_set is not None:
+            queries = load_query_set(query_set.expanduser().resolve())
+        else:
+            queries = draw_anchors(before.record_ids, count=anchors, seed=anchor_seed)
+        result = compare_stores(
+            before=before,
+            after=after,
+            query_set=queries,
+            thresholds=thresholds,
+            candidate_pool=candidate_pool,
+            seed=anchor_seed,
+        )
+        document = result.to_document()
+        document["measures_user_search_quality"] = result.measures_user_search_quality
+        document["moves_lock_in_score"] = result.passed and queries.selection == SEEDED_RANDOM
+        if record is not None:
+            attach_quality(record.expanduser().resolve(), result)
+            document["record"] = str(record.expanduser().resolve())
+        print_json(document)
+    except (QualityError, EmbedderError, EvidenceError) as exc:
         handle_error(CliError(str(exc), INVALID_INPUT), verbose)
     except Exception as exc:
         handle_error(exc, verbose)

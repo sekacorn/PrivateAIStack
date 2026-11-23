@@ -1,0 +1,10 @@
+{
+  "schema_version": "golden-query-set.v1",
+  "mode": "text",
+  "description": "Free-text queries with expected records, so hit rate and MRR apply.",
+  "queries": [
+    { "text": "topic three and some shared vocabulary", "expected_records": ["r0003", "r0010"] },
+    { "text": "record about topic five", "expected_records": ["r0005"] },
+    { "text": "shared vocabulary here" }
+  ]
+}
