@@ -38,6 +38,7 @@ from private_ai_stack.reembed.quality import (
     SAMPLED,
     SEEDED_RANDOM,
     TEXT,
+    UNJUDGED,
     _average_ranks,
     _spearman,
 )
@@ -192,16 +193,93 @@ def test_the_draw_is_not_simply_the_first_records_by_identifier(stores: tuple[An
 # --- thresholds -------------------------------------------------------------
 
 
-def test_a_comparison_with_no_metric_threshold_is_refused(stores: tuple[Any, Any, Path]) -> None:
+def test_a_comparison_with_no_metric_threshold_is_unjudged_not_discarded(
+    stores: tuple[Any, Any, Path],
+) -> None:
     before, after, _ = stores
 
-    with pytest.raises(QualityError, match="No metric threshold was declared"):
-        compare_stores(
-            before=before,
-            after=after,
-            query_set=draw_anchors(before.record_ids, count=24, seed="s"),
-            thresholds=QualityThresholds(top_k=5, minimum_sample_size=10),
-        )
+    result = compare_stores(
+        before=before,
+        after=after,
+        query_set=draw_anchors(before.record_ids, count=24, seed="s"),
+        thresholds=QualityThresholds(top_k=5, minimum_sample_size=10),
+    )
+
+    assert result.status == UNJUDGED
+    assert not result.judged
+    assert not result.passed
+    # The measurement is real; only the verdict is absent.
+    assert 0.0 <= result.metrics["top_k_overlap"] <= 1.0
+    assert result.sufficient_evidence
+    assert result.query_set_size == 24
+
+
+def test_an_unjudged_result_names_the_floors_that_would_give_a_verdict(
+    stores: tuple[Any, Any, Path],
+) -> None:
+    before, after, _ = stores
+
+    result = compare_stores(
+        before=before,
+        after=after,
+        query_set=draw_anchors(before.record_ids, count=24, seed="s"),
+        thresholds=QualityThresholds(top_k=5, minimum_sample_size=10),
+    )
+
+    assert result.notes is not None
+    assert "minimum_top_k_overlap" in result.notes
+    assert "minimum_rank_correlation" in result.notes
+    # Anchors have no expected records, so the drop caps are not an option here.
+    assert "anchors do not have" in result.notes
+    assert len(result.notes) <= 512
+
+
+def test_an_unjudged_result_carries_only_the_sample_size_check(stores: tuple[Any, Any, Path]) -> None:
+    before, after, _ = stores
+
+    result = compare_stores(
+        before=before,
+        after=after,
+        query_set=draw_anchors(before.record_ids, count=24, seed="s"),
+        thresholds=QualityThresholds(top_k=5, minimum_sample_size=10),
+    )
+
+    assert [check.name for check in result.checks] == ["minimum_sample_size"]
+    assert all(check.passed for check in result.checks)
+    assert set(result.thresholds) == {"minimum_sample_size"}
+
+
+def test_an_unjudged_result_can_never_move_a_score(stores: tuple[Any, Any, Path]) -> None:
+    before, after, _ = stores
+
+    seeded = compare_stores(
+        before=before,
+        after=after,
+        query_set=draw_anchors(before.record_ids, count=24, seed="s"),
+        thresholds=QualityThresholds(top_k=5, minimum_sample_size=10),
+    )
+
+    # Even a seeded draw, which is the only kind that can move a score, cannot
+    # move one without a verdict to move it on.
+    assert seeded.anchor_selection == SEEDED_RANDOM
+    assert not seeded.passed
+    assert not seeded.judged
+
+
+def test_text_mode_without_expected_records_is_told_about_them(stores: tuple[Any, Any, Path]) -> None:
+    before, after, _ = stores
+    queries = QuerySet(mode=TEXT, selection=OPERATOR, seed=None, queries=(("shared vocabulary", ()),))
+
+    result = compare_stores(
+        before=before,
+        after=after,
+        query_set=queries,
+        thresholds=QualityThresholds(top_k=5, minimum_sample_size=1),
+    )
+
+    assert result.status == UNJUDGED
+    assert result.notes is not None
+    assert "Expected records would also bring the drop caps into play" in result.notes
 
 
 def test_the_declared_thresholds_travel_with_the_verdict(stores: tuple[Any, Any, Path]) -> None:

@@ -41,12 +41,16 @@ hand-picked set from a flattering one.
 Thresholds
 ----------
 
-There are no built-in agreement floors, and a run that would produce no metric
-check at all is refused rather than reported. An operator says what acceptable
-means before asking whether it was met; a tool that supplied the bar would be
-grading its own homework. The declared bar travels with the verdict in the
-record's ``thresholds``, so no reader sees "sampled" without seeing what was
-cleared.
+There are no built-in agreement floors. An operator says what acceptable means
+before asking whether it was met; a tool that supplied the bar would be grading
+its own homework. The declared bar travels with the verdict in the record's
+``thresholds``, so no reader sees "sampled" without seeing what was cleared.
+
+A run with no agreement floor still gets its numbers. It is reported as
+``unjudged``: the metrics are real and the verdict does not exist, the result
+names the floors that would produce one, and it can never move a lock-in score.
+Throwing the measurement away because a declaration was missing would be the
+wrong trade in the other direction.
 """
 
 from __future__ import annotations
@@ -88,6 +92,7 @@ RETRIEVAL_RELEVANCE: Final = "retrieval_relevance"
 
 SAMPLED: Final = "sampled"
 BELOW_THRESHOLD: Final = "below_threshold"
+UNJUDGED: Final = "unjudged"
 NOT_MEASURED: Final = "not_measured"
 
 SIMILARITY: Final = "cosine"
@@ -233,6 +238,16 @@ class QualityResult:
     @property
     def passed(self) -> bool:
         return self.status == SAMPLED
+
+    @property
+    def judged(self) -> bool:
+        """Whether a verdict was reached at all.
+
+        ``unjudged`` means the comparison ran, produced metrics, and was held
+        against no agreement floor because none was declared. The numbers are
+        real and the verdict does not exist, so nothing may read it as a pass.
+        """
+        return self.status in (SAMPLED, BELOW_THRESHOLD)
 
     @property
     def measures_user_search_quality(self) -> bool:
@@ -648,7 +663,27 @@ def _build_checks(metrics: dict[str, float], thresholds: QualityThresholds, samp
 
 
 def _metric_checks(checks: list[Check]) -> list[Check]:
+    """The checks that judge the comparison.
+
+    The sample-size check is a gate on whether to report at all, not a
+    judgement of what was found, so a run carrying only that one has measured
+    and judged nothing.
+    """
     return [check for check in checks if check.name != "minimum_sample_size"]
+
+
+def _missing_floors(query_set: QuerySet) -> str:
+    """What an operator can declare to turn these metrics into a verdict.
+
+    A result with no verdict has to say this, or it reads as a dead end rather
+    than as a declaration the operator can still supply.
+    """
+    guidance = (
+        "No agreement floor was declared, so there is no verdict. Declare minimum_top_k_overlap or minimum_rank_correlation to get one."
+    )
+    if query_set.mode == RECORD_ANCHORED:
+        return f"{guidance} The drop caps need expected records, which anchors do not have."
+    return f"{guidance} Expected records would also bring the drop caps into play."
 
 
 def _text_embedders(before: VectorStore, after: VectorStore) -> tuple[Embedder, Embedder]:
@@ -815,18 +850,20 @@ def compare_stores(
         )
 
     checks = _build_checks(metrics, limits, evaluated)
-    if not _metric_checks(checks):
-        raise QualityError(
-            "No metric threshold was declared, so this comparison would produce numbers and no verdict. "
-            "Declare minimum_top_k_overlap or minimum_rank_correlation, or supply expected records so the "
-            "hit-rate and MRR drop caps apply. This package ships no agreement floor of its own."
-        )
-    status = SAMPLED if all(check.passed for check in checks) else BELOW_THRESHOLD
+    judged = bool(_metric_checks(checks))
+    if not judged:
+        status = UNJUDGED
+    elif all(check.passed for check in checks):
+        status = SAMPLED
+    else:
+        status = BELOW_THRESHOLD
     note = (
         "Neighborhood agreement between the two stores. Not a measurement of search quality."
         if basis == NEIGHBORHOOD_AGREEMENT
         else "Retrieval against operator-declared expected records."
     )
+    if not judged:
+        note = f"{_missing_floors(query_set)} {note}"
     return QualityResult(
         status=status,
         sufficient_evidence=True,

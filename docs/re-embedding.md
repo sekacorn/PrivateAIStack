@@ -254,12 +254,23 @@ trusting this tool to have applied it.
 
 ### You declare the thresholds
 
-There are no built-in agreement floors, and a run that would produce no metric
-check at all is **refused** rather than reported. Declare
-`--min-top-k-overlap`, `--min-rank-correlation`, or supply `expected_records`
-so the hit-rate and MRR drop caps apply. A floor this package invented would be
+There are no built-in agreement floors. A floor this package invented would be
 a bar nobody set, and a verdict against it would be this tool's opinion in your
 voice.
+
+A run with no floor still gets its numbers. It reports `status: unjudged`: the
+metrics are real, the verdict does not exist, and the notes name what to
+declare to get one — `--min-top-k-overlap`, `--min-rank-correlation`, or
+`expected_records` in the query set so the hit-rate and MRR drop caps apply.
+`unjudged` can never move a lock-in score, whoever drew the queries, because
+there is no verdict for a score to move on.
+
+| Status | Means | Can move 50 → 25 |
+|---|---|---|
+| `sampled` | Every declared threshold was met. | Yes, with the other four conditions |
+| `below_threshold` | At least one declared threshold was not met. | No |
+| `unjudged` | Metrics measured, no agreement floor declared, so no verdict. | No |
+| `not_measured` | No query set, none usable, or fewer queries than `--min-sample-size`. | No |
 
 The bar travels with the verdict. Every declared threshold is written into the
 record's `thresholds` and listed among the suite's `attested_claims`, so no
@@ -274,6 +285,7 @@ one is not wasted on the other.
 | Equal similarities | Ordered by ascending `record_id`, recorded in `tie_break`, so a reader can tell a tie from a disagreement. |
 | The top-k boundary falls inside a tie | Counted in `boundary_ties`. Membership there was decided by the tie break, not by the vectors. |
 | Every candidate tied for a query | Rank correlation is undefined for it, `correlation_undefined` is set, and no 0 is invented. A 0 would read as disagreement rather than as absence. |
+| No agreement floor declared | `unjudged`: the metrics are reported and the notes name what to declare. |
 | No query could be evaluated | `not_measured`, no metrics, and a note saying it is not a passing result. |
 | Fewer queries than `--min-sample-size` | `not_measured` with `sufficient_evidence: false`. The comparison ran; it is not reported as a measurement. |
 | An anchor absent from either store | Counted in `queries_skipped`, not fatal. |
