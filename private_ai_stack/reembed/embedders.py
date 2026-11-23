@@ -12,6 +12,13 @@ same scheme at two dimensions is two models, because the bucket a token lands
 in is ``hash(token) % dimensions``: change the dimension and every component
 moves. No backend default is ever consulted, and a declared dimension that the
 produced vector does not have is an error rather than something to paper over.
+
+``revision`` is the only part of an identity that can carry a change of
+behaviour, so **any change to an embedder's output requires a new revision**.
+Otherwise a refactor silently invalidates every store and record produced under
+the old behaviour while the identity in the evidence still reads the same.
+``tests/fixtures/reembed/golden-vectors.json`` pins the current output of every
+identity below and fails the moment one moves.
 """
 
 from __future__ import annotations
