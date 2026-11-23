@@ -380,3 +380,147 @@ def test_the_two_fixtures_cover_the_sampled_and_unsampled_shapes() -> None:
     assert sampled["calibration"] is not None and sampled["projection"] is not None
     assert unsampled["calibration"] is None and unsampled["projection"] is None
     assert sampled["records_to_embed"] == unsampled["records_to_embed"]
+
+
+def _aimeter(total: str) -> types.ModuleType:
+    """A stand-in for aimeter-oss that returns a chosen total, as AIMeter prints it."""
+
+    class _Record:
+        def __init__(self, data: dict[str, Any]) -> None:
+            self.data = data
+
+    class _Profile:
+        def __init__(self, data: dict[str, Any]) -> None:
+            self.data = data
+
+    def _calculate(record: Any, profile: Any) -> dict[str, Any]:
+        return {
+            "status": "estimated",
+            "currency": record.data["cost"]["currency"],
+            "total_cost": total,
+            "components": {"gpu": total},
+            "assumptions": "stand-in",
+        }
+
+    module = types.ModuleType("ai_meter")
+    module.UsageRecord = _Record  # type: ignore[attr-defined]
+    module.InfrastructureProfile = _Profile  # type: ignore[attr-defined]
+    module.calculate_local_inference_cost = _calculate  # type: ignore[attr-defined]
+    module.__version__ = "9.9.9"  # type: ignore[attr-defined]
+    return module
+
+
+FREE_PROFILE: dict[str, Any] = {
+    "profile": {
+        "id": "free-metal",
+        "currency": "USD",
+        "compute": {"gpu_hourly_cost": "0", "cpu_hourly_cost": "0", "memory_hourly_cost": "0"},
+        "allocation": {"overhead_percentage": "0"},
+    }
+}
+
+
+def test_a_cost_that_rounds_to_zero_is_reported_as_below_precision(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Microseconds of hashing really do cost something; printing 0.000000 would
+    read as free, which is a different claim."""
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("0.000000"))
+    cost = _estimate(source, sample_size=2, cost_profile=PROFILE).to_document()["cost"]
+    assert cost["status"] == "estimated"
+    assert cost["total_cost_precision"] == "below_reporting_precision"
+    assert cost["total_cost_bound"] == "< 0.000001 USD"
+    assert "not free" in cost["total_cost_detail"]
+
+
+def test_the_bound_follows_aimeters_own_precision(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bound is derived from the decimals AIMeter printed, not hardcoded."""
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("0.00"))
+    cost = _estimate(source, sample_size=2, cost_profile=PROFILE).to_document()["cost"]
+    assert cost["total_cost_bound"] == "< 0.01 USD"
+
+
+def test_the_limits_say_the_cost_is_not_free(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("0.000000"))
+    limits = _estimate(source, sample_size=2, cost_profile=PROFILE).to_document()["limits"]
+    assert any("is not free" in limit for limit in limits)
+    assert any("< 0.000001 USD" in limit for limit in limits)
+
+
+def test_a_profile_with_no_positive_rate_keeps_a_true_zero(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A profile that says the compute is free is not imprecise, it is free."""
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("0.000000"))
+    document = _estimate(source, sample_size=2, cost_profile=FREE_PROFILE).to_document()
+    cost = document["cost"]
+    assert cost["total_cost"] == "0.000000"
+    assert cost["total_cost_precision"] == "exact_zero"
+    assert "total_cost_bound" not in cost
+    assert not any("not free" in limit for limit in document["limits"])
+
+
+def test_a_positive_cost_gets_no_precision_note(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("1.250000"))
+    cost = _estimate(source, sample_size=2, cost_profile=PROFILE).to_document()["cost"]
+    assert cost["total_cost"] == "1.250000"
+    assert "total_cost_precision" not in cost
+    assert "total_cost_bound" not in cost
+
+
+def test_an_energy_only_profile_still_counts_as_a_positive_rate(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("0.000000"))
+    profile = {
+        "profile": {
+            "id": "energy-only",
+            "currency": "USD",
+            "compute": {"gpu_hourly_cost": "0", "cpu_hourly_cost": "0", "memory_hourly_cost": "0"},
+            "energy": {"average_watts": "280", "electricity_per_kwh": "0.16"},
+        }
+    }
+    cost = _estimate(source, sample_size=2, cost_profile=profile).to_document()["cost"]
+    assert cost["total_cost_precision"] == "below_reporting_precision"
+
+
+def test_no_records_is_not_reported_as_below_precision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing to embed is nothing to extrapolate, not a cost too small to print."""
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("0.000000"))
+    empty = build_source_store(tmp_path / "empty", texts={}, missing=("procedure-gone",), dimensions=8)
+    document = estimate_re_embed(
+        source_document=empty,
+        source_store_id="support-memory",
+        target_model=MODEL,
+        sample_size=4,
+        cost_profile=PROFILE,
+    ).to_document()
+    assert document["records_to_embed"] == 0
+    assert document["cost"]["status"] == "not_estimated"
+    assert "nothing to extrapolate" in document["cost"]["reason"]
+    assert "total_cost_precision" not in document["cost"]
+
+
+def test_an_unparsable_total_is_left_alone(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If AIMeter ever returns something this code cannot read, it must not guess."""
+    monkeypatch.setitem(sys.modules, "ai_meter", _aimeter("not-a-number"))
+    cost = _estimate(source, sample_size=2, cost_profile=PROFILE).to_document()["cost"]
+    assert cost["total_cost"] == "not-a-number"
+    assert "total_cost_precision" not in cost
+
+
+def test_the_cost_extra_declares_aimeter_in_the_suites_range() -> None:
+    """The extra exists so `pip install privateaistack[cost]` is a documented
+    request, and its range matches the suite's so one AIMeter resolves."""
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
+    assert extras["cost"] == ["aimeter-oss>=0.2.0b1,<0.3.0"]
+    assert "aimeter-oss>=0.2.0b1,<0.3.0" in extras["all"]
+
+
+def test_the_new_cost_fields_are_declared_in_the_schema() -> None:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    cost = schema["properties"]["cost"]["properties"]
+    assert set(cost["total_cost_precision"]["enum"]) == {"below_reporting_precision", "exact_zero"}
+    assert "total_cost_bound" in cost
+    assert any(
+        rule.get("if", {}).get("properties", {}).get("total_cost_precision", {}).get("const") == "below_reporting_precision"
+        and rule["then"]["required"] == ["total_cost_bound"]
+        for rule in schema["properties"]["cost"]["allOf"]
+    )

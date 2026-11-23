@@ -54,6 +54,14 @@ General installation can use the latest published version:
 python -m pip install privateaistack
 ```
 
+Optional extras: `postgres` and `observability` for pgvector and OTLP tracing,
+and `cost` for the re-embedding cost estimate, which delegates its money
+arithmetic to `aimeter-oss` rather than reimplementing it:
+
+```bash
+python -m pip install "privateaistack[cost]"
+```
+
 Package identity:
 
 - PyPI distribution: `privateaistack`

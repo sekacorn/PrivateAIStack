@@ -159,13 +159,35 @@ expose its tokenisation gets a whitespace count that says so on its face.
 
 ### Cost in money comes from AIMeter, or not at all
 
+```powershell
+python -m pip install "privateaistack[cost]"
+```
+
 Pass `--cost-profile profile.json`, in the shape AIMeter's
 `local_cost_profile_catalog()` emits, and the money arithmetic is delegated to
-`aimeter-oss` and credited in the document. This project does not depend on
-AIMeter, so without it installed the estimate says exactly that and reports
-records, tokens and latency instead. Nothing here reimplements that arithmetic,
-and a profile's own assumptions are the operator's: AIMeter's templates state
-on their face that they are examples to be replaced.
+`aimeter-oss` and credited in the document. AIMeter is optional, behind the
+`[cost]` extra above, whose range matches the AI Infrastructure Suite's so a
+machine with both resolves one version of AIMeter rather than two. Without it
+installed the estimate says exactly that and reports records, tokens and
+latency instead. Nothing here reimplements that arithmetic, and a profile's own
+assumptions are the operator's: AIMeter's templates state on their face that
+they are examples to be replaced.
+
+**A cost that prints as zero is not a cost of zero.** Embedding a handful of
+short records with a hashing scheme takes microseconds, so the total rounds to
+`0.000000`, which a reader could take for free. The estimate distinguishes the
+two cases:
+
+| `total_cost_precision` | Means |
+|---|---|
+| `below_reporting_precision` | Above zero but smaller than the smallest unit AIMeter reports. `total_cost_bound` gives that bound, for example `< 0.000001 USD`, and the limits list says it is not free. |
+| `exact_zero` | The profile declares no positive rate at all, so the cost really is nothing. |
+
+Neither appears when the total is positive. The bound is derived from the
+number of decimals AIMeter itself printed, so it stays correct if that
+precision ever changes. A store with no records to embed reports
+`not_estimated` as before: nothing to embed is nothing to extrapolate, which is
+a different statement from a cost too small to print.
 
 The estimate is a **forecast, not evidence**. `exit-report` never reads it, it
 carries no digest of itself, and it is deliberately not reproducible: measured
