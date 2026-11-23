@@ -296,3 +296,73 @@ def test_the_quality_command_is_discoverable() -> None:
 
     assert result.exit_code == 0
     assert "quality" in result.output
+
+
+# --- egress flags -----------------------------------------------------------
+
+
+def _egress_run(source: Path, target: Path, *extra: str) -> Any:
+    return runner.invoke(app, _arguments(source, target) + list(extra))
+
+
+def test_a_run_is_local_unless_told_otherwise(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target")
+
+    assert result.exit_code == 0, result.output
+    record = json.loads((tmp_path / "target" / "re-embed-record.json").read_text(encoding="utf-8"))
+    assert record["egress"]["hosting_mode"] == "local"
+    assert record["egress"]["remote_provider_used"] is False
+
+
+def test_a_hosted_run_without_allow_hosted_exits_two(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--hosting-mode", "hosted", "--provider", "example-hosted")
+
+    assert result.exit_code == 2
+    assert "Hosted execution was not enabled" in result.output
+    assert not (tmp_path / "target" / "re-embed-record.json").exists()
+
+
+def test_the_blocking_warning_is_shown_before_the_refusal(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--hosting-mode", "hosted", "--provider", "example-hosted")
+
+    assert "hosted execution is blocked until explicitly enabled" in result.output
+
+
+def test_an_allowed_hosted_run_from_the_cli_says_no_provider_ships(source: Path, tmp_path: Path) -> None:
+    # The CLI cannot supply a hosted embedder, so this is where an operator
+    # learns the boundary rather than getting a silent local run.
+    result = _egress_run(
+        source,
+        tmp_path / "target",
+        "--hosting-mode",
+        "hosted",
+        "--provider",
+        "example-hosted",
+        "--allow-hosted",
+    )
+
+    assert result.exit_code == 2
+    assert "ships no hosted provider" in result.output
+
+
+def test_a_local_run_naming_a_provider_exits_two(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--provider", "example-hosted")
+
+    assert result.exit_code == 2
+    assert "must not name a provider" in result.output
+
+
+def test_an_unknown_classification_exits_two(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--data-classification", "top-secret")
+
+    assert result.exit_code == 2
+
+
+def test_telemetry_is_warned_about_and_recorded(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--telemetry-enabled")
+
+    assert result.exit_code == 0, result.output
+    assert "telemetry is enabled" in result.output
+    record = json.loads((tmp_path / "target" / "re-embed-record.json").read_text(encoding="utf-8"))
+    assert record["egress"]["telemetry_enabled"] is True
+    assert record["egress"]["warnings"] == ["telemetry is enabled; review exported fields before execution"]

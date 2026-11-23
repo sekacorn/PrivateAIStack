@@ -6,8 +6,10 @@ with retained source text, re-embeds it with a different model in resumable
 batches, and writes both the rebuilt store and a ``re-embed-record.v1``
 describing the run.
 
-Nothing here opens a socket or loads weights. Remote providers arrive in 3b-5
-behind an explicit opt-in.
+By default nothing here opens a socket or loads weights. A hosted run is gated
+by :func:`provider_data_preflight`: it is refused unless an operator explicitly
+allowed it, it needs an embedder the operator supplies because this package
+ships no hosted provider, and every run records what left the machine.
 
 :func:`compare_stores` answers the question that follows the rebuild: do the
 two stores still put the same records near each other? It reports neighborhood
@@ -42,6 +44,17 @@ from private_ai_stack.reembed.estimate import (
 )
 from private_ai_stack.reembed.evidence import EvidenceError, SourceRecord, SourceStore, load_source_store
 from private_ai_stack.reembed.pipeline import DEFAULT_BATCH_SIZE, ReEmbedError, ReEmbedOutcome, re_embed_store
+from private_ai_stack.reembed.privacy import (
+    DEFAULT_CLASSIFICATION,
+    HOSTED,
+    HOSTING_MODES,
+    LOCAL,
+    PRIVACY_CLASSIFICATIONS,
+    EgressError,
+    EgressPreflight,
+    local_egress,
+    provider_data_preflight,
+)
 from private_ai_stack.reembed.quality import (
     DEFAULT_ANCHOR_COUNT,
     DEFAULT_CANDIDATE_POOL,
@@ -68,12 +81,17 @@ __all__ = [
     "BUILT_IN_MODEL_IDS",
     "DEFAULT_ANCHOR_COUNT",
     "DEFAULT_BATCH_SIZE",
+    "DEFAULT_CLASSIFICATION",
     "DEFAULT_CANDIDATE_POOL",
     "DEFAULT_MINIMUM_SAMPLE_SIZE",
     "DEFAULT_SAMPLE_SEED",
     "DEFAULT_SAMPLE_SIZE",
     "DEFAULT_SEED",
     "DEFAULT_TOP_K",
+    "HOSTED",
+    "HOSTING_MODES",
+    "LOCAL",
+    "PRIVACY_CLASSIFICATIONS",
     "PRIVATEAISTACK_HASHED_BOW",
     "QUERY_SET_SCHEMA_VERSION",
     "SEEDED_RANDOM",
@@ -82,6 +100,8 @@ __all__ = [
     "Checkpoint",
     "CheckpointError",
     "Embedder",
+    "EgressError",
+    "EgressPreflight",
     "EmbedderError",
     "EstimateError",
     "EvidenceError",
@@ -105,6 +125,8 @@ __all__ = [
     "load_cost_profile",
     "load_query_set",
     "load_source_store",
+    "local_egress",
     "load_vector_store",
+    "provider_data_preflight",
     "re_embed_store",
 ]

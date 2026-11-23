@@ -13,12 +13,16 @@ three things into a target directory:
     A ``re-embed-record.v1`` saying what was rebuilt, what was skipped and why,
     how the run was batched, and what left the machine.
 
-Nothing here opens a socket or loads weights. The target is one of the two
-built-in hashing schemes, which are pure arithmetic over :mod:`hashlib`, so the
-run is reproducible by anyone holding the same source text. Remote providers
-arrive in 3b-5 behind an explicit opt-in, and the ``egress`` block is written
-now so that a later remote run has nowhere to hide: a reader who sees the
-block cannot mistake its absence for a local run.
+By default nothing here opens a socket or loads weights, and the target is one
+of the two built-in hashing schemes: pure arithmetic over :mod:`hashlib`, so the
+run is reproducible by anyone holding the same source text.
+
+A hosted run is possible and is gated. :func:`provider_data_preflight` decides
+it before any record is read, let alone any text sent, and the ``egress`` block
+is written on every run so that a remote one has nowhere to hide: a reader who
+sees the block cannot mistake its absence for a local run. This package ships
+no hosted provider, so a hosted run needs an operator-supplied embedder and is
+refused without one rather than quietly falling back to a local model.
 
 The record this writes carries no ``quality`` block. A comparison has not been
 run, and ``not_measured`` is a claim about a measurement that was attempted and
@@ -55,6 +59,7 @@ from private_ai_stack.reembed.evidence import (
     SourceStore,
     load_source_store,
 )
+from private_ai_stack.reembed.privacy import EgressError, EgressPreflight, local_egress
 
 DEFAULT_BATCH_SIZE: Final = 64
 """Bounded for a 16 GB machine, and bounded regardless of store size.
@@ -234,6 +239,7 @@ def re_embed_store(
     weights_sha256: str | None = None,
     license_name: str | None = None,
     embedder: Embedder | None = None,
+    egress: EgressPreflight | None = None,
 ) -> ReEmbedOutcome:
     """Rebuild one store with ``target_model``, resuming an interrupted run if one is there.
 
@@ -241,12 +247,33 @@ def re_embed_store(
     that no offline check can confirm, and defaulting it would put a claim into
     the evidence that nobody made.
 
-    ``embedder`` exists so tests can supply a deliberately broken one; left
-    unset, the built-in registry builds the embedder from ``target_model`` and
-    an identity it does not implement is refused rather than approximated.
+    ``embedder`` exists so tests can supply a deliberately broken one, and so
+    an operator can supply a hosted one; left unset, the built-in registry
+    builds the embedder from ``target_model`` and an identity it does not
+    implement is refused rather than approximated.
+
+    ``egress`` defaults to local, which is the only default that cannot
+    surprise anyone. A hosted run that the operator has not explicitly allowed
+    is refused here, before the evidence document is even opened, so the
+    refusal cannot depend on anything the input says.
     """
     if not 1 <= batch_size <= MAX_BATCH_SIZE:
         raise ReEmbedError(f"batch_size must be between 1 and {MAX_BATCH_SIZE}, not {batch_size}.")
+    gate = egress if egress is not None else local_egress()
+    # First, before any file is read and long before any text could be sent.
+    if gate.blocked:
+        raise ReEmbedError(
+            f"Hosted execution was not enabled, so this run is refused before anything is read or sent. "
+            f"Warnings: {'; '.join(gate.warnings)}."
+        )
+    if gate.content_leaves_machine and embedder is None:
+        raise ReEmbedError(
+            "A hosted run needs an embedder supplied by the operator. This package ships no hosted "
+            "provider, and falling back to a local model would make the record say hosted about a run "
+            "that was not."
+        )
+    if not gate.content_leaves_machine and embedder is not None and gate.is_hosted:
+        raise ReEmbedError("A blocked hosted run cannot use an embedder; nothing may be sent.")
     try:
         store = load_source_store(Path(source_document), source_store_id)
     except EvidenceError as exc:
@@ -348,6 +375,13 @@ def re_embed_store(
 
     missing = store.count(MISSING)
     deleted = store.count(DELETED_BY_POLICY)
+    # Only retained records have text, so only retained records can have been
+    # sent. A count taken from the plan rather than from what was embedded
+    # would over-report on a resumed run and under-report on an interrupted one.
+    try:
+        egress_block = gate.to_document(records_transmitted=len(retained) if gate.content_leaves_machine else 0)
+    except EgressError as exc:
+        raise ReEmbedError(str(exc)) from None
     record_path = directory / RECORD_FILENAME
     write_json_atomically(
         record_path,
@@ -370,7 +404,7 @@ def re_embed_store(
                 "deleted_by_policy_skipped": deleted,
                 "failed": 0,
             },
-            "egress": {"remote_provider_used": False, "records_transmitted": 0, "raw_source_text_transmitted": False},
+            "egress": egress_block,
         },
     )
     return ReEmbedOutcome(

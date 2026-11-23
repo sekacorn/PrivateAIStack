@@ -22,13 +22,16 @@ from private_ai_stack.reembed import (
     DEFAULT_ANCHOR_COUNT,
     DEFAULT_BATCH_SIZE,
     DEFAULT_CANDIDATE_POOL,
+    DEFAULT_CLASSIFICATION,
     DEFAULT_MINIMUM_SAMPLE_SIZE,
     DEFAULT_SAMPLE_SEED,
     DEFAULT_SAMPLE_SIZE,
     DEFAULT_SEED,
     DEFAULT_TOP_K,
+    PRIVACY_CLASSIFICATIONS,
     SEEDED_RANDOM,
     CheckpointError,
+    EgressError,
     EmbedderError,
     EstimateError,
     EvidenceError,
@@ -43,6 +46,7 @@ from private_ai_stack.reembed import (
     load_cost_profile,
     load_query_set,
     load_vector_store,
+    provider_data_preflight,
     re_embed_store,
 )
 
@@ -653,15 +657,52 @@ def reembed_run(
     ] = None,
     batch_size: Annotated[int, typer.Option("--batch-size", help="Records per batch and per shard.")] = DEFAULT_BATCH_SIZE,
     output: Annotated[Path | None, typer.Option("--estimate-output", help="Also write the estimate document here.")] = None,
+    hosting_mode: Annotated[str, typer.Option("--hosting-mode", help="local or hosted. Local opens no socket at all.")] = "local",
+    provider: Annotated[
+        str | None, typer.Option("--provider", help="The hosted provider. Required for, and only for, a hosted run.")
+    ] = None,
+    data_classification: Annotated[
+        str,
+        typer.Option(
+            "--data-classification",
+            help=f"The operator's classification of the source text. One of {', '.join(sorted(PRIVACY_CLASSIFICATIONS))}.",
+        ),
+    ] = DEFAULT_CLASSIFICATION,
+    allow_hosted: Annotated[
+        bool,
+        typer.Option("--allow-hosted", help="Explicitly permit source text to leave the machine. Off by default."),
+    ] = False,
+    redaction_applied: Annotated[
+        bool, typer.Option("--redaction-applied", help="Attest that the transmitted text was redacted. Never checked.")
+    ] = False,
+    telemetry_enabled: Annotated[
+        bool, typer.Option("--telemetry-enabled", help="Record that provider telemetry was left on for the run.")
+    ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", help="Show raw exceptions.")] = False,
 ) -> None:
     """Rebuild a store with a different model, or estimate what that would cost.
 
     ``--estimate-only`` embeds the calibration sample and nothing else: no
     shard, no checkpoint and no rebuilt store are written.
+
+    The default is local: no socket is opened. A hosted run needs both
+    ``--hosting-mode hosted`` and ``--allow-hosted``, and an embedder supplied
+    in code, because this package ships no hosted provider.
     """
     try:
         identity = ModelIdentity(id=model_id, revision=model_revision, dimensions=dimensions)
+        egress = provider_data_preflight(
+            provider=provider,
+            hosting_mode=hosting_mode,
+            dataset_privacy_classification=data_classification,
+            allow_hosted=allow_hosted,
+            telemetry_enabled=telemetry_enabled,
+            redaction_applied=redaction_applied,
+        )
+        for warning in egress.warnings:
+            # Printed before the run, to stderr, so an operator sees it whether
+            # or not the run goes ahead and whether or not they are piping JSON.
+            typer.echo(f"egress warning: {warning}", err=True)
         profile = load_cost_profile(cost_profile.expanduser().resolve()) if cost_profile is not None else None
         if estimate_only:
             estimate = estimate_re_embed(
@@ -683,6 +724,7 @@ def reembed_run(
             target_model=identity,
             availability=availability,
             batch_size=batch_size,
+            egress=egress,
         )
         print_json(
             {
@@ -699,7 +741,7 @@ def reembed_run(
                 "complete": outcome.complete,
             }
         )
-    except (EstimateError, EmbedderError, EvidenceError, ReEmbedError, CheckpointError) as exc:
+    except (EstimateError, EmbedderError, EvidenceError, ReEmbedError, CheckpointError, EgressError) as exc:
         handle_error(CliError(str(exc), INVALID_INPUT), verbose)
     except Exception as exc:
         handle_error(exc, verbose)

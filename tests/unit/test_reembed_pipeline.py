@@ -209,7 +209,16 @@ def test_the_record_accounts_for_the_run(tmp_path: Path) -> None:
         "resumed": False,
         "checkpoint_sha256": hashlib.sha256(outcome.checkpoint.read_bytes()).hexdigest(),
     }
-    assert record["egress"] == {"remote_provider_used": False, "records_transmitted": 0, "raw_source_text_transmitted": False}
+    assert record["egress"] == {
+        "remote_provider_used": False,
+        "records_transmitted": 0,
+        "raw_source_text_transmitted": False,
+        "hosting_mode": "local",
+        "hosted_execution_confirmed": False,
+        "dataset_privacy_classification": "unknown",
+        "redaction_applied": False,
+        "telemetry_enabled": False,
+    }
 
 
 def test_the_record_makes_no_quality_claim_because_nothing_was_compared(tmp_path: Path) -> None:

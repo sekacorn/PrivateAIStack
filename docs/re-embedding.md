@@ -313,12 +313,84 @@ The fields beyond `status`, `query_set_size` and `top_k` are additive within
 block refuses unknown fields. Reading a record this command writes needs
 **ai-infrastructure-suite 0.1.0b3 or later**.
 
+## What leaves the machine
+
+Re-embedding sends source text to a model, which the evidence work in 3a never
+did. That is the sharpest new risk in the phase, so it has a gate rather than a
+convention.
+
+**The default is local.** Nothing opens a socket, and tests assert that by
+replacing `socket.socket` with something that fails the test if anything
+touches it, rather than by trusting that nothing did.
+
+**A hosted run needs two things said out loud**, and a third that this package
+does not provide:
+
+```
+privateaistack reembed run ./evidence/embedding-portability.json ...   --hosting-mode hosted --provider example-hosted   --data-classification confidential --allow-hosted
+```
+
+| Flag | Default | Means |
+|---|---|---|
+| `--hosting-mode` | `local` | `local` opens no socket at all. |
+| `--provider` | none | Required for, and only for, a hosted run. Naming one on a local run is refused. |
+| `--allow-hosted` | off | The explicit opt-in. Without it a hosted run is refused **before the evidence document is opened**. |
+| `--data-classification` | `unknown` | The operator's classification. Attested, never checked. |
+| `--redaction-applied` | off | An attestation that the text was redacted. Attested, never checked. |
+| `--telemetry-enabled` | off | Recorded, and warned about even on a local run. |
+
+The refusal happens before any file is read, so it cannot depend on anything
+the input says — a test passes a path that does not exist and still gets the
+egress refusal, for the right reason.
+
+**This package ships no hosted provider.** An allowed hosted run needs an
+embedder supplied in code. Falling back to a local model would make the record
+say `hosted` about a run that was not, so it is refused instead. From the CLI a
+hosted run therefore always stops at that boundary, which is the honest place
+for an operator to meet it.
+
+### Every run records what left
+
+The `egress` block is written on every run, so its absence can never be
+mistaken for a local run. A hosted run records the provider, the count, whether
+raw text went, the opt-in, the classification, the redaction claim, the
+telemetry state, and the preflight warnings the operator was shown.
+
+`records_transmitted` counts records actually embedded, not planned: records
+whose source text is `missing` or `deleted_by_policy` have nothing to send, so
+counting them would over-report what left.
+
+Two of those fields are attested and appear in the suite's `attested_claims`.
+No scanner can read source text and tell whether an organisation considers it
+confidential, or whether a redaction removed what the operator thinks it
+removed.
+
+The rule that a run cannot report transmitting content nobody enabled lives in
+the suite's reader as well as in this gate, so a tool that skipped its own
+check still cannot produce a readable record of having done so.
+
+### The warnings are the same sentences ModelSwapBench uses
+
+`hosted execution is blocked until explicitly enabled`,
+`private unredacted dataset content would be transmitted to a hosted provider`
+and `telemetry is enabled; review exported fields before execution` are
+restated here verbatim, because the two projects take no dependency on each
+other and an operator who has read one tool's warning should not have to learn
+a second wording for the same risk. A test pins the strings.
+
+One wording is worth naming rather than quietly changing: the unredacted
+warning is silenced by a classification of `public` **or** `unknown`, which is
+what ModelSwapBench does. `unknown` is the weaker of the two, and it is also
+the default, so a hosted run with no classification given does not raise that
+warning. Changing it would mean the two tools disagreeing, which is the worse
+problem.
+
 ## What this does not do yet
 
-- **No network.** Nothing here opens a socket or loads weights, and a test
-  asserts it. Remote providers arrive in 3b-5 behind an explicit opt-in. The
-  `egress` block is written now, always, so a later remote run has nowhere to
-  hide: a reader cannot mistake a missing block for a local run.
+- **No hosted provider ships here.** The gate, the seam and the record are
+  here; choosing a vendor, writing its client and taking a runtime dependency
+  on an HTTP library are decisions for whoever is doing the sending. A hosted
+  run needs an embedder supplied in code and is refused without one.
 - **No quality claim from `reembed run`.** A record `run` writes has no
   `quality` block at all. `not_measured` is a claim about a measurement that
   was attempted and found insufficient; `run` attempts nothing, so the honest
