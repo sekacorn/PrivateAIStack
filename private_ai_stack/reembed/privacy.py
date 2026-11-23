@@ -9,6 +9,23 @@ is therefore attested, never described as isolated or scanner-verified.
 Consent is checked before the source evidence document is opened. The pipeline
 derives transmission fields from payloads it actually submits; operator flags
 cannot claim that untransformed text was redacted.
+
+Submission is not delivery
+--------------------------
+
+This package hands a payload to a callable. It cannot observe what that
+callable does next, so it cannot know that any provider received anything.
+``records_transmitted`` is kept because readers and the shipped schema already
+use the name, but it is **submission accounting**, and every record that
+carries it also carries ``transmission_basis`` saying so. A reader who sees
+only the count must not be able to read it as confirmed delivery, so the
+qualifier travels with the number rather than living in prose somewhere else.
+
+The count is exact for what it names -- distinct records in completed
+checkpoint batches -- and is not a count of attempts. An executor may retry
+internally where this package cannot see it, and a crash before a checkpoint
+reaches disk discards a batch whose records were already handed over. Both mean
+attempts can exceed the number reported, which is stated rather than implied.
 """
 
 from __future__ import annotations
@@ -38,6 +55,19 @@ CLASSIFICATION_BLOCKED_WARNING: Final = "hosted execution is blocked for this da
 UNREDACTED_WARNING: Final = "private unredacted dataset content would be transmitted to a hosted provider"
 TELEMETRY_WARNING: Final = "telemetry is enabled; review exported fields before execution"
 EXTERNAL_ATTESTED_WARNING: Final = "external executor network behaviour is operator-attested and unverified"
+DELIVERY_UNVERIFIED_WARNING: Final = "records handed to an external executor are not confirmed delivered to any provider"
+HANDED_TO_EXECUTOR: Final = "handed_to_executor"
+NO_TRANSMISSION: Final = "no_transmission"
+TRANSMISSION_BASES: Final = frozenset({HANDED_TO_EXECUTOR, NO_TRANSMISSION})
+"""What a transmission count is a count of.
+
+``handed_to_executor``: records this pipeline passed to the executor callable.
+``no_transmission``: a registry-owned embedder ran and nothing was handed to
+anything. Neither value ever means a provider received a record.
+"""
+
+TRANSMISSION_ACCOUNTING: Final = "distinct_records_in_completed_batches"
+DELIVERY_UNVERIFIED: Final = "unverified"
 MAX_WARNINGS: Final = 16
 MAX_PROVIDER_CHARS: Final = 128
 MAX_ENDPOINT_CHARS: Final = 2048
@@ -103,6 +133,9 @@ def _warnings(
     warnings: list[str] = []
     if executor_kind == EXTERNAL_UNVERIFIED:
         warnings.append(EXTERNAL_ATTESTED_WARNING)
+        # Stated to the operator, not only recorded afterwards: the count this
+        # run reports is what was handed over, never what arrived.
+        warnings.append(DELIVERY_UNVERIFIED_WARNING)
         if not external_confirmed:
             warnings.append(BLOCKED_WARNING)
         if hosting_mode == HOSTED and not hosted_confirmed:
@@ -242,7 +275,11 @@ class EgressPreflight:
             "executor_kind": self.executor_kind,
             "execution_verification": "attested" if self.is_external else "registry_owned",
             "remote_provider_used": remotely_used,
+            # Kept under its established name for schema compatibility, and
+            # never left to speak for itself: transmission_basis below says
+            # what it counts, so the number cannot be read as delivery.
             "records_transmitted": records_submitted if remotely_used else 0,
+            "transmission_basis": HANDED_TO_EXECUTOR if self.is_external else NO_TRANSMISSION,
             "records_submitted_to_external_executor": records_submitted if self.is_external else 0,
             "raw_source_text_transmitted": remotely_used,
             "hosting_mode": self.hosting_mode,
@@ -256,6 +293,13 @@ class EgressPreflight:
             document["executor_id"] = self.provider
             document["endpoint_origin"] = self.endpoint_origin
             document["network_behavior_verification"] = "attested"
+            # The count is exact for what it names and is not a count of
+            # attempts: an executor may retry where this package cannot see
+            # it, and a crash before a checkpoint reaches disk discards a
+            # batch whose records were already handed over.
+            document["transmission_accounting"] = TRANSMISSION_ACCOUNTING
+            document["transmission_attempts_may_exceed_count"] = True
+            document["delivery_verification"] = DELIVERY_UNVERIFIED
         if remotely_used:
             document["provider"] = self.provider
         if self.warnings:

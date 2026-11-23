@@ -12,19 +12,24 @@ import pytest
 from private_ai_stack.reembed import (
     DEFAULT_CLASSIFICATION,
     EXTERNAL_UNVERIFIED,
+    HANDED_TO_EXECUTOR,
     HOSTED,
     LOCAL,
     LOCAL_BUILTIN,
+    NO_TRANSMISSION,
+    TRANSMISSION_BASES,
     EgressError,
     ModelIdentity,
     ReEmbedError,
     provider_data_preflight,
     re_embed_store,
 )
+from private_ai_stack.reembed.checkpoint import CHECKPOINT_FILENAME
 from private_ai_stack.reembed.embedders import Embedder, build_built_in_embedder
 from private_ai_stack.reembed.privacy import (
     BLOCKED_WARNING,
     CLASSIFICATION_BLOCKED_WARNING,
+    DELIVERY_UNVERIFIED_WARNING,
     EXTERNAL_ATTESTED_WARNING,
     HOSTED_BLOCKED_WARNING,
     TELEMETRY_WARNING,
@@ -89,6 +94,23 @@ class RecordingEmbedder:
     def embed(self, text: str) -> list[float]:
         self.texts.append(text)
         return self._inner.embed(text)
+
+
+class FailingAfter(RecordingEmbedder):
+    """Fails once it has already embedded ``limit`` records.
+
+    Distinct from :class:`InterruptingEmbedder`: this raises an ordinary
+    exception, which the pipeline sanitises, rather than a KeyboardInterrupt.
+    """
+
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self.limit = limit
+
+    def embed(self, text: str) -> list[float]:
+        if len(self.texts) >= self.limit:
+            raise RuntimeError("executor failed")
+        return super().embed(text)
 
 
 class InterruptingEmbedder(RecordingEmbedder):
@@ -346,3 +368,207 @@ def test_telemetry_is_attested_and_warned_for_external_execution() -> None:
 
 def test_embedder_protocol_remains_structurally_compatible() -> None:
     assert isinstance(RecordingEmbedder(), Embedder)
+
+
+# --- 3b-5B: submission is not delivery -------------------------------------
+
+
+def test_a_local_run_reports_no_transmission_basis(source: Path, tmp_path: Path) -> None:
+    outcome = _run(source, tmp_path / "target")
+
+    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    assert egress["records_transmitted"] == 0
+    assert egress["transmission_basis"] == "no_transmission"
+    # A registry-owned run hands nothing to anything, so the fields that
+    # qualify a handover do not apply to it.
+    assert "delivery_verification" not in egress
+    assert "transmission_accounting" not in egress
+
+
+def test_an_external_count_is_qualified_as_handed_over_not_delivered(source: Path, tmp_path: Path) -> None:
+    outcome = _run(source, tmp_path / "target", embedder=build_built_in_embedder(MODEL), egress=_external_hosted())
+
+    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    # The count keeps its established name for schema compatibility, and the
+    # qualifier travels with it so it cannot be read as confirmed delivery.
+    assert egress["records_transmitted"] == 3
+    assert egress["transmission_basis"] == "handed_to_executor"
+    assert egress["transmission_accounting"] == "distinct_records_in_completed_batches"
+    assert egress["delivery_verification"] == "unverified"
+    assert egress["transmission_attempts_may_exceed_count"] is True
+
+
+def test_a_local_external_executor_is_also_qualified(source: Path, tmp_path: Path) -> None:
+    # Nothing left the machine, but something was still handed to operator code.
+    outcome = _run(source, tmp_path / "target", embedder=RecordingEmbedder(), egress=_external_local())
+
+    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    assert egress["records_transmitted"] == 0
+    assert egress["records_submitted_to_external_executor"] == 3
+    assert egress["transmission_basis"] == "handed_to_executor"
+    assert egress["delivery_verification"] == "unverified"
+
+
+def test_the_operator_is_warned_that_delivery_is_not_confirmed() -> None:
+    gate = _external_hosted()
+
+    assert DELIVERY_UNVERIFIED_WARNING in gate.warnings
+    # And a registry-owned run makes no such claim either way.
+    assert DELIVERY_UNVERIFIED_WARNING not in local_egress().warnings
+
+
+def test_the_delivery_warning_is_recorded_with_the_run(source: Path, tmp_path: Path) -> None:
+    outcome = _run(source, tmp_path / "target", embedder=build_built_in_embedder(MODEL), egress=_external_hosted())
+
+    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    assert DELIVERY_UNVERIFIED_WARNING in egress["warnings"]
+
+
+def test_no_record_can_claim_verified_delivery(source: Path, tmp_path: Path) -> None:
+    # Whatever an operator declares, nothing in the written evidence may say a
+    # provider received anything.
+    outcome = _run(source, tmp_path / "target", embedder=build_built_in_embedder(MODEL), egress=_external_hosted())
+
+    body = outcome.record.read_text(encoding="utf-8")
+    assert "verified_delivery" not in body
+    assert "unverified" in body
+
+
+# --- 3b-5B: executor failure, partial batches, crash and resume ------------
+
+
+def test_an_executor_failure_mid_batch_writes_no_shard_for_that_batch(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={f"r{i}": f"text {i}" for i in range(4)}, dimensions=8)
+    target = tmp_path / "target"
+
+    # Fails on the third record, so the second batch is partially embedded.
+    with pytest.raises(ReEmbedError, match="failed while processing a source record"):
+        _run(source, target, batch_size=2, embedder=FailingAfter(2), egress=_external_local())
+
+    shards = sorted(path.name for path in (target / "vectors").iterdir()) if (target / "vectors").is_dir() else []
+    assert shards == ["shard-0000.jsonl"]
+    # No record was written at all, so nothing claims a count for a run that
+    # did not finish.
+    assert not (target / "re-embed-record.json").exists()
+
+
+def test_a_partially_embedded_batch_is_discarded_not_counted(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={f"r{i}": f"text {i}" for i in range(4)}, dimensions=8)
+    target = tmp_path / "target"
+    gate = _external_local()
+    with pytest.raises(ReEmbedError):
+        _run(source, target, batch_size=2, embedder=FailingAfter(3), egress=gate)
+
+    resumed = _run(source, target, batch_size=2, embedder=RecordingEmbedder(), egress=gate)
+
+    egress = json.loads(resumed.record.read_text(encoding="utf-8"))["egress"]
+    # Four distinct records, counted once each, even though the third was
+    # handed over twice across the two invocations.
+    assert egress["records_submitted_to_external_executor"] == 4
+    assert egress["transmission_attempts_may_exceed_count"] is True
+
+
+def test_a_resumed_run_re_hands_the_discarded_batch(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={f"r{i}": f"text {i}" for i in range(4)}, dimensions=8)
+    target = tmp_path / "target"
+    gate = _external_local()
+    with pytest.raises(KeyboardInterrupt):
+        _run(source, target, batch_size=2, embedder=InterruptingEmbedder(3), egress=gate)
+
+    recorder = RecordingEmbedder()
+    _run(source, target, batch_size=2, embedder=recorder, egress=gate)
+
+    # The second batch is re-handed in full, which is a retry the count does
+    # not and cannot show. This is why the count is published as a lower bound
+    # on attempts rather than as a delivery figure.
+    assert recorder.texts == ["text 2", "text 3"]
+
+
+def test_the_count_never_exceeds_the_records_that_exist(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={f"r{i}": f"text {i}" for i in range(3)}, dimensions=8)
+    target = tmp_path / "target"
+    gate = _external_local()
+    for _ in range(3):
+        with pytest.raises(KeyboardInterrupt):
+            _run(source, target, batch_size=1, embedder=InterruptingEmbedder(0), egress=gate)
+    outcome = _run(source, target, batch_size=1, embedder=RecordingEmbedder(), egress=gate)
+
+    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    # Repeated interruptions must not inflate the figure by double counting.
+    assert egress["records_submitted_to_external_executor"] == 3
+
+
+# --- 3b-5B: missing and deleted records are never restored -----------------
+
+
+def test_deleted_and_missing_records_are_absent_from_the_rebuilt_store(tmp_path: Path) -> None:
+    source = build_source_store(
+        tmp_path / "evidence",
+        texts={"kept": "retained text"},
+        missing=("gone",),
+        deleted_by_policy=("purged",),
+        dimensions=8,
+    )
+
+    outcome = _run(source, tmp_path / "target", embedder=RecordingEmbedder(), egress=_external_local())
+
+    rebuilt = json.loads(outcome.target_document.read_text(encoding="utf-8"))
+    store = rebuilt["stores"][0]
+    identifiers = {entry["record_id"] for entry in store["vectors"]["source_text"]}
+    assert identifiers == {"kept"}
+    # Rebuilding a vector for text an operator declared deleted would undo the
+    # deletion, which is worse than failing.
+    shard_body = (outcome.target_document.parent / "vectors/shard-0000.jsonl").read_text(encoding="utf-8")
+    assert "purged" not in shard_body
+    assert "gone" not in shard_body
+
+
+# --- 3b-5B: no secrets in durable artefacts -------------------------------
+
+
+def test_the_checkpoint_holds_no_source_text_or_endpoint_secrets(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={"kept": "cardholder 4111111111111111 secret"}, dimensions=8)
+    target = tmp_path / "target"
+
+    _run(
+        source,
+        target,
+        embedder=RecordingEmbedder(),
+        egress=_external_local(endpoint="http://127.0.0.1:11434/embed"),
+    )
+
+    body = (target / CHECKPOINT_FILENAME).read_text(encoding="utf-8")
+    assert "cardholder" not in body
+    assert "4111111111111111" not in body
+    # The checkpoint binds the execution context by digest, not by echoing it.
+    assert "/embed" not in body
+
+
+def test_the_written_record_holds_no_source_text(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={"kept": "cardholder 4111111111111111 secret"}, dimensions=8)
+
+    outcome = _run(source, tmp_path / "target", embedder=RecordingEmbedder(), egress=_external_local())
+
+    body = outcome.record.read_text(encoding="utf-8")
+    assert "cardholder" not in body
+    assert "4111111111111111" not in body
+
+
+# --- 3b-5B: public API compatibility --------------------------------------
+
+
+def test_records_transmitted_keeps_its_name_and_its_old_meaning(source: Path, tmp_path: Path) -> None:
+    # A reader written against the shipped schema still finds the field, with
+    # the same type and the same zero for a run that sent nothing.
+    outcome = _run(source, tmp_path / "target")
+
+    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    assert isinstance(egress["records_transmitted"], int)
+    assert egress["records_transmitted"] == 0
+    assert egress["remote_provider_used"] is False
+
+
+def test_the_transmission_basis_values_are_the_declared_set() -> None:
+    assert TRANSMISSION_BASES == {"handed_to_executor", "no_transmission"}
+    assert HANDED_TO_EXECUTOR in TRANSMISSION_BASES
+    assert NO_TRANSMISSION in TRANSMISSION_BASES

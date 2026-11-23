@@ -360,11 +360,43 @@ actual count to `records_transmitted` and records
 `missing` and `deleted_by_policy` records never enter a batch and are never
 submitted.
 
+#### Submission is not delivery
+
+This package hands a payload to a callable. It cannot observe what that
+callable does next, so it never knows that a provider received anything.
+
+`records_transmitted` keeps its established name because readers and the
+shipped schema already use it, but it is **submission accounting**, and the
+qualifier travels with the number rather than living only in prose:
+
+| Field | Value | Says |
+|---|---|---|
+| `transmission_basis` | `handed_to_executor` | The count is records this pipeline passed to the executor callable. |
+| `transmission_basis` | `no_transmission` | A registry-owned embedder ran; nothing was handed to anything. |
+| `transmission_accounting` | `distinct_records_in_completed_batches` | Exactly what the number counts. |
+| `transmission_attempts_may_exceed_count` | `true` | Attempts can be higher than the count. See below. |
+| `delivery_verification` | `unverified` | No provider delivery was established. There is no other value. |
+
+The last three appear only for an external executor, because a registry-owned
+run has no handover to qualify.
+
+The count is exact for what it names and is **not** a count of attempts. Two
+things can push attempts above it, and both are stated rather than implied:
+an executor may retry internally where this package cannot see it, and a crash
+before a checkpoint reaches disk discards a batch whose records were already
+handed over, so a resume hands them again. A test drives exactly that case and
+asserts the re-handover happens while the distinct count stays correct.
+
+Nothing in a written record can say a provider received a record. The operator
+is also warned before the run: `records handed to an external executor are not
+confirmed delivered to any provider`.
+
+#### Resume binding
+
 Checkpoints are bound to the executor kind, provider, endpoint origin,
 classification, and consent context. A resume cannot switch those declarations
-and then attribute earlier batches to a different executor. The count is the
-number of distinct records represented by durable completed batches, not a
-provider request count; a crash before a checkpoint may cause a provider retry.
+and then attribute earlier batches to a different executor. The binding is by
+digest, so the checkpoint does not echo the endpoint it commits to.
 
 For `local_builtin`, the record says `registry_owned`. For
 `external_unverified`, execution and network behaviour say `attested`. Neither

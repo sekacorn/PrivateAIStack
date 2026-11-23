@@ -368,3 +368,56 @@ def test_local_builtin_cannot_claim_provider_telemetry(source: Path, tmp_path: P
 
     assert result.exit_code == 2
     assert "cannot claim external consent or provider telemetry" in result.output
+
+
+# --- 3b-5B: CLI diagnostics leak nothing sensitive -------------------------
+
+
+def test_a_refused_external_run_does_not_echo_the_declared_endpoint(source: Path, tmp_path: Path) -> None:
+    # An endpoint can carry a routing hint an operator does not want in logs.
+    # The refusal is about consent, so it does not need to repeat the URL.
+    result = runner.invoke(
+        app,
+        _arguments(source, tmp_path / "target")
+        + [
+            "--provider",
+            "example-hosted",
+            "--endpoint",
+            "https://embeddings.example/v1/secret-tenant-path",
+            "--hosting-mode",
+            "hosted",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "secret-tenant-path" not in result.output
+
+
+def test_cli_output_never_contains_source_text(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={"kept": "cardholder 4111111111111111 secret"}, dimensions=8)
+
+    result = runner.invoke(app, _arguments(source, tmp_path / "target"))
+
+    assert result.exit_code == 0, result.output
+    assert "cardholder" not in result.output
+    assert "4111111111111111" not in result.output
+
+
+def test_an_invalid_endpoint_is_refused_without_echoing_it(source: Path, tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        _arguments(source, tmp_path / "target")
+        + [
+            "--provider",
+            "example-hosted",
+            "--endpoint",
+            "https://user:tenant-password@embeddings.example/v1",
+            "--hosting-mode",
+            "hosted",
+            "--allow-external",
+            "--allow-hosted",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "tenant-password" not in result.output

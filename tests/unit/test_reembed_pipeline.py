@@ -220,6 +220,7 @@ def test_the_record_accounts_for_the_run(tmp_path: Path) -> None:
         "execution_verification": "registry_owned",
         "remote_provider_used": False,
         "records_transmitted": 0,
+        "transmission_basis": "no_transmission",
         "records_submitted_to_external_executor": 0,
         "raw_source_text_transmitted": False,
         "hosting_mode": "local",
