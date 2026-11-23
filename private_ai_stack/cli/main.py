@@ -775,6 +775,7 @@ def reembed_quality(
         )
         document = result.to_document()
         document["measures_user_search_quality"] = result.measures_user_search_quality
+        document["judged"] = result.judged
         document["moves_lock_in_score"] = result.passed and queries.selection == SEEDED_RANDOM
         if record is not None:
             attach_quality(record.expanduser().resolve(), result)

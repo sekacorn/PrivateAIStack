@@ -197,6 +197,7 @@ def test_the_quality_command_reports_a_seeded_record_anchored_comparison(ranked:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["status"] == "sampled"
+    assert payload["judged"] is True
     assert payload["anchor_selection"] == "seeded_random"
     assert payload["metric_basis"] == "neighborhood_agreement"
     assert payload["measures_user_search_quality"] is False
@@ -226,13 +227,21 @@ def test_an_operator_query_set_is_reported_as_moving_no_score(ranked: tuple[Path
     assert "anchor_seed" not in payload
 
 
-def test_the_quality_command_needs_a_declared_floor(ranked: tuple[Path, Path]) -> None:
+def test_the_quality_command_reports_unjudged_without_a_declared_floor(
+    ranked: tuple[Path, Path],
+) -> None:
     before, after = ranked
 
-    result = _quality(before, after, "--top-k", "5", "--anchors", "24")
+    result = _quality(before, after, "--top-k", "5", "--anchors", "24", "--min-sample-size", "10")
 
-    assert result.exit_code == 2
-    assert "No metric threshold was declared" in result.output
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "unjudged"
+    assert payload["judged"] is False
+    assert payload["moves_lock_in_score"] is False
+    # The numbers survive, and the output says what to declare for a verdict.
+    assert "top_k_overlap" in payload["metrics"]
+    assert "minimum_top_k_overlap" in payload["notes"]
 
 
 def test_an_empty_draw_reports_not_measured_rather_than_failing(ranked: tuple[Path, Path]) -> None:
