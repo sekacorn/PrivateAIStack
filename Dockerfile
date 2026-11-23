@@ -1,4 +1,4 @@
-FROM python:3.13-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 WORKDIR /app
 ENV PIP_NO_CACHE_DIR=1
@@ -6,7 +6,7 @@ COPY pyproject.toml README.md ./
 COPY private_ai_stack ./private_ai_stack
 RUN python -m pip install --upgrade pip && python -m pip wheel --wheel-dir /wheels ".[postgres,observability]"
 
-FROM python:3.13-slim-bookworm AS runtime
+FROM python:3.14-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
