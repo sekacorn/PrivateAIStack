@@ -56,8 +56,11 @@ jobs:
           echo "Resolved latest in range: $resolved"
           echo "PRIVATEAISTACK_AGENTFORGE_EXPECTED=$resolved" >> "$GITHUB_ENV"
       - name: Conformance and golden vectors against that release
+        # --no-cov: this job runs a subset, so the project's 80% coverage gate
+        # does not apply to it. Coverage is enforced by the `test` matrix over
+        # the whole suite.
         run: |
-          python -m pytest -v \
+          python -m pytest -v --no-cov \
             tests/unit/test_reembed_agentforge_range.py \
             tests/unit/test_reembed_embedders.py \
             tests/unit/test_reembed_golden_vectors.py
