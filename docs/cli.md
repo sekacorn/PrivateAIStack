@@ -39,3 +39,105 @@ privateaistack restore --directory . backups/private_ai_stack.sql
 The model commands operate inside the Docker Compose Ollama service by default. A model installed in a host Ollama service is not automatically present in the Compose named volume.
 
 Commands use subprocess argument arrays and do not interpolate shell strings.
+
+## `reembed`
+
+Rebuilding a vector store with a different embedding model, and comparing what
+the rebuild retrieves. These commands do not touch a deployment: they read
+`embedding-portability.v1` evidence documents and write files. Nothing in them
+opens a socket or loads weights, and a test asserts it.
+
+```bash
+privateaistack reembed run --help
+privateaistack reembed quality --help
+```
+
+Both exit `0` on success and `2` on invalid input, which includes an unknown
+store identifier, a model identity this package does not implement, a document
+that is not the schema it claims, and a file whose bytes no longer match a
+digest the document declares for them.
+
+### `reembed run`
+
+Rebuilds one store out of an evidence document with a different model, in
+resumable batches, and writes the rebuilt store, its own
+`embedding-portability.v1` document, a `re-embed-record.v1` and a checkpoint.
+
+```bash
+privateaistack reembed run ./evidence/embedding-portability.json   --source-store support-memory   --target-directory ./rebuilt   --target-store support-memory-rebuilt   --model-id privateaistack.hashed-bow.sha256-signed   --model-revision 1   --dimensions 64   --availability open_weight_self_hostable
+```
+
+| Option | Means |
+|---|---|
+| `--source-store` | Which store in the document to rebuild. |
+| `--target-directory` | Where to write the rebuilt store. |
+| `--target-store` | Identifier for the rebuilt store. |
+| `--model-id` | Target model id. Built in: `agentforge.hashed-bow.blake2b`, `privateaistack.hashed-bow.sha256-signed`. |
+| `--model-revision` | Target model revision. |
+| `--dimensions` | Target model dimensions. **Never defaulted**, because model identity is the triple id + revision + dimensions and the same scheme at two dimensions is two models. |
+| `--availability` | `open_weight_self_hostable` or `vendor_only`. An operator attestation no offline check can confirm, so it has no default either. |
+| `--batch-size` | Records per batch and per shard. Default 64. |
+
+Re-running the same command against the same target directory resumes an
+interrupted run rather than starting over, and reports `resumed: true`. A batch
+whose shard reached disk but was never claimed by the checkpoint is discarded
+and re-embedded, never trusted.
+
+### `reembed run --estimate-only`
+
+Embeds a small calibration sample, measures it, extrapolates to the whole
+store, and exits **without writing any shard, checkpoint or rebuilt store**.
+
+```bash
+privateaistack reembed run ./evidence/embedding-portability.json   --source-store support-memory   --target-directory ./rebuilt --target-store support-memory-rebuilt   --model-id privateaistack.hashed-bow.sha256-signed   --model-revision 1 --dimensions 64   --availability open_weight_self_hostable   --estimate-only --sample-size 16 --cost-profile ./cost-profile.json
+```
+
+| Option | Means |
+|---|---|
+| `--estimate-only` | Report the estimate and exit. Nothing is rebuilt. |
+| `--sample-size` | Calibration sample size. Default 16. `0` reports no estimate rather than a guess. |
+| `--sample-seed` | Seed for the sample selection, recorded in the estimate. |
+| `--cost-profile` | A local cost profile as JSON, in AIMeter's shape. **Without one, no money figure is reported at all.** |
+| `--estimate-output` | Also write the `re-embed-estimate.v1` document here. |
+
+Only `records_to_embed` is exact. Every other figure is extrapolated from the
+sample and is not a quotation. Measured latency is not portable to another
+machine, so the estimate is deliberately not reproducible and is never read as
+evidence by `exit-report`.
+
+Money arithmetic is delegated to AIMeter and never reimplemented here. Install
+it with `pip install "privateaistack[cost]"`; without it the estimate says so
+rather than guessing. See [re-embedding.md](re-embedding.md) for the
+`total_cost_precision` values, including why a rounded-to-zero cost is reported
+as below reporting precision with a bound rather than as free.
+
+### `reembed quality`
+
+Ranks both stores for every query and reports what agreed, optionally writing
+the result into the run's `re-embed-record.v1`.
+
+```bash
+privateaistack reembed quality ./evidence/embedding-portability.json ./rebuilt/embedding-portability.json   --before-store support-memory --after-store support-memory-rebuilt   --top-k 10 --min-top-k-overlap 0.7   --record ./rebuilt/re-embed-record.json
+```
+
+| Option | Means |
+|---|---|
+| `--before-store`, `--after-store` | Which store in each document. |
+| `--query-set` | A `golden-query-set.v1` document. A file is always operator-chosen, so the result reports in full and **can never move a lock-in score**. |
+| `--anchors` | How many anchors to draw by seed when no query set is supplied. Default 32. |
+| `--anchor-seed` | Seed for the draw, recorded in the result. Default `re-embed-quality`. |
+| `--top-k` | How many neighbours each ranking keeps. Default 10. |
+| `--candidate-pool` | How many records each query is ranked against. Default 256. A `top_k_overlap` is a share of this pool, not of the whole store. |
+| `--min-sample-size` | Below this many evaluated queries the result is `not_measured`. Default 20. |
+| `--min-top-k-overlap` | Agreement floor. **No default**: a floor this package invented would be a bar nobody set. |
+| `--min-rank-correlation` | Agreement floor. No default, same reason. |
+| `--record` | A `re-embed-record.v1` to write the quality block into, replacing any earlier one. |
+
+The default mode is record-anchored, which measures **neighborhood agreement
+and never search quality**. Declare at least one agreement floor to get a
+verdict. [re-embedding.md](re-embedding.md) has the statuses, the metrics, how
+ties and empty query sets are handled, and why only a seeded draw can move a
+score.
+
+Reading a record this command writes needs ai-infrastructure-suite 0.1.0b3 or
+later.
