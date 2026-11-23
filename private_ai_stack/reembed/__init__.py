@@ -6,10 +6,10 @@ with retained source text, re-embeds it with a different model in resumable
 batches, and writes both the rebuilt store and a ``re-embed-record.v1``
 describing the run.
 
-By default nothing here opens a socket or loads weights. A hosted run is gated
-by :func:`provider_data_preflight`: it is refused unless an operator explicitly
-allowed it, it needs an embedder the operator supplies because this package
-ships no hosted provider, and every run records what left the machine.
+By default a run uses a registry-owned local embedder. An injected embedder is
+``external_unverified`` and is refused before source files are read unless an
+operator explicitly allows it. The package records what it submitted without
+claiming OS-level network isolation or verified behaviour for arbitrary code.
 
 :func:`compare_stores` answers the question that follows the rebuild: do the
 two stores still put the same records near each other? It reports neighborhood
@@ -46,9 +46,12 @@ from private_ai_stack.reembed.evidence import EvidenceError, SourceRecord, Sourc
 from private_ai_stack.reembed.pipeline import DEFAULT_BATCH_SIZE, ReEmbedError, ReEmbedOutcome, re_embed_store
 from private_ai_stack.reembed.privacy import (
     DEFAULT_CLASSIFICATION,
+    EXECUTOR_KINDS,
+    EXTERNAL_UNVERIFIED,
     HOSTED,
     HOSTING_MODES,
     LOCAL,
+    LOCAL_BUILTIN,
     PRIVACY_CLASSIFICATIONS,
     EgressError,
     EgressPreflight,
@@ -88,9 +91,12 @@ __all__ = [
     "DEFAULT_SAMPLE_SIZE",
     "DEFAULT_SEED",
     "DEFAULT_TOP_K",
+    "EXECUTOR_KINDS",
+    "EXTERNAL_UNVERIFIED",
     "HOSTED",
     "HOSTING_MODES",
     "LOCAL",
+    "LOCAL_BUILTIN",
     "PRIVACY_CLASSIFICATIONS",
     "PRIVATEAISTACK_HASHED_BOW",
     "QUERY_SET_SCHEMA_VERSION",

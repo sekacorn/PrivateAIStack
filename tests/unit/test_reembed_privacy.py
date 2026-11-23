@@ -1,14 +1,9 @@
-"""The egress gate: a hosted run is impossible without a flag, and impossible to hide.
-
-Negative test 6 of the phase 3b plan lives here. Every test is offline, and
-several assert that by proving no socket could have been opened rather than by
-trusting that none was.
-"""
+"""Trust-boundary tests for built-in and injected re-embedding executors."""
 
 from __future__ import annotations
 
 import json
-import socket
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -16,22 +11,26 @@ import pytest
 
 from private_ai_stack.reembed import (
     DEFAULT_CLASSIFICATION,
+    EXTERNAL_UNVERIFIED,
     HOSTED,
     LOCAL,
+    LOCAL_BUILTIN,
     EgressError,
     ModelIdentity,
     ReEmbedError,
     provider_data_preflight,
     re_embed_store,
 )
-from private_ai_stack.reembed.embedders import build_built_in_embedder
+from private_ai_stack.reembed.embedders import Embedder, build_built_in_embedder
 from private_ai_stack.reembed.privacy import (
     BLOCKED_WARNING,
+    CLASSIFICATION_BLOCKED_WARNING,
+    EXTERNAL_ATTESTED_WARNING,
+    HOSTED_BLOCKED_WARNING,
     TELEMETRY_WARNING,
-    UNREDACTED_WARNING,
     local_egress,
 )
-from tests.unit.reembed_support import build_source_store
+from tests.unit.reembed_support import build_source_store, tree_digest
 
 MODEL = ModelIdentity(id="privateaistack.hashed-bow.sha256-signed", revision="1", dimensions=8)
 
@@ -53,259 +52,297 @@ def _run(source: Path, target: Path, **kwargs: Any) -> Any:
     )
 
 
-class NoSocket:
-    """A socket type that fails the test if anything tries to use it."""
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        raise AssertionError("A re-embedding run must not open a socket.")
-
-
-@pytest.fixture
-def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make opening a socket an immediate test failure, not a silent success."""
-    monkeypatch.setattr(socket, "socket", NoSocket)
-    monkeypatch.setattr(socket, "create_connection", NoSocket)
-    monkeypatch.setattr(socket, "getaddrinfo", NoSocket)
+def _external_local(**overrides: Any) -> Any:
+    arguments: dict[str, Any] = {
+        "executor_kind": EXTERNAL_UNVERIFIED,
+        "provider": "local-test-executor",
+        "endpoint": "http://127.0.0.1:11434/embed",
+        "allow_external": True,
+    }
+    arguments.update(overrides)
+    return provider_data_preflight(**arguments)
 
 
-# --- the default ------------------------------------------------------------
+def _external_hosted(**overrides: Any) -> Any:
+    arguments: dict[str, Any] = {
+        "executor_kind": EXTERNAL_UNVERIFIED,
+        "provider": "example-hosted",
+        "endpoint": "https://embeddings.example/v1",
+        "hosting_mode": HOSTED,
+        "dataset_privacy_classification": "public",
+        "allow_external": True,
+        "allow_hosted": True,
+    }
+    arguments.update(overrides)
+    return provider_data_preflight(**arguments)
 
 
-def test_the_default_sends_nothing(no_network: None) -> None:
+class RecordingEmbedder:
+    def __init__(self) -> None:
+        self._inner = build_built_in_embedder(MODEL)
+        self.texts: list[str] = []
+
+    @property
+    def identity(self) -> ModelIdentity:
+        return self._inner.identity
+
+    def embed(self, text: str) -> list[float]:
+        self.texts.append(text)
+        return self._inner.embed(text)
+
+
+class InterruptingEmbedder(RecordingEmbedder):
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self.limit = limit
+
+    def embed(self, text: str) -> list[float]:
+        if len(self.texts) >= self.limit:
+            raise KeyboardInterrupt("simulated interruption")
+        return super().embed(text)
+
+
+def test_default_is_registry_owned_local_execution(source: Path, tmp_path: Path) -> None:
     gate = local_egress()
-
+    assert gate.executor_kind == LOCAL_BUILTIN
     assert gate.hosting_mode == LOCAL
-    assert not gate.is_hosted
     assert gate.allowed
+    assert not gate.is_external
     assert not gate.content_leaves_machine
-    assert not gate.blocked
-    assert gate.warnings == ()
 
-
-def test_a_caller_who_passes_nothing_cannot_send_anything(no_network: None) -> None:
-    # Every default is the safe one, so an incomplete call is a safe call.
-    assert not provider_data_preflight().content_leaves_machine
-
-
-def test_the_default_classification_is_unknown_not_public(no_network: None) -> None:
-    # public is the one classification that silences the unredacted warning, so
-    # defaulting to it would assert something nobody said and hide the warning.
-    assert DEFAULT_CLASSIFICATION == "unknown"
-    assert provider_data_preflight().dataset_privacy_classification == "unknown"
-
-
-def test_a_local_run_writes_an_egress_block_saying_nothing_left(source: Path, tmp_path: Path, no_network: None) -> None:
     outcome = _run(source, tmp_path / "target")
-
     egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
-    assert egress["remote_provider_used"] is False
-    assert egress["records_transmitted"] == 0
-    assert egress["raw_source_text_transmitted"] is False
-    assert egress["hosting_mode"] == "local"
-    assert egress["hosted_execution_confirmed"] is False
-    # The block is always written, so its absence can never be mistaken for a
-    # local run.
-    assert "warnings" not in egress
+    assert egress["executor_kind"] == LOCAL_BUILTIN
+    assert egress["execution_verification"] == "registry_owned"
+    assert egress["records_submitted_to_external_executor"] == 0
 
 
-# --- negative test 6: a remote provider without the opt-in ------------------
+def test_old_local_call_and_explicit_local_gate_are_byte_compatible(source: Path, tmp_path: Path) -> None:
+    implicit = tmp_path / "implicit"
+    explicit = tmp_path / "explicit"
+    _run(source, implicit)
+    _run(source, explicit, egress=local_egress())
+    assert tree_digest(implicit) == tree_digest(explicit)
 
 
-def test_a_hosted_run_without_the_opt_in_is_refused_before_anything_is_read(source: Path, tmp_path: Path, no_network: None) -> None:
-    gate = provider_data_preflight(provider="example-hosted", hosting_mode=HOSTED, allow_hosted=False)
+@pytest.mark.parametrize("value", ["true", "false", 1, 0, None])
+def test_external_opt_in_must_be_an_exact_boolean(value: object) -> None:
+    with pytest.raises(EgressError, match="allow_external must be a boolean"):
+        provider_data_preflight(
+            executor_kind=EXTERNAL_UNVERIFIED,
+            provider="external",
+            endpoint="http://127.0.0.1:11434",
+            allow_external=value,  # type: ignore[arg-type]
+        )
+
+
+def test_omitted_external_opt_in_is_default_deny() -> None:
+    gate = provider_data_preflight(
+        executor_kind=EXTERNAL_UNVERIFIED,
+        provider="external",
+        endpoint="http://127.0.0.1:11434",
+    )
     assert gate.blocked
-
-    with pytest.raises(ReEmbedError, match="Hosted execution was not enabled"):
-        _run(source, tmp_path / "target", egress=gate)
-
-    # Nothing was written, so nothing was read far enough to write it.
-    assert not (tmp_path / "target" / "re-embed-record.json").exists()
-    assert not (tmp_path / "target" / "vectors").exists()
+    assert BLOCKED_WARNING in gate.warnings
 
 
-def test_the_refusal_does_not_depend_on_the_input_being_readable(tmp_path: Path, no_network: None) -> None:
-    # The gate closes before the evidence document is opened, so a hosted run
-    # is refused for the right reason even when the input is nonsense.
-    absent = tmp_path / "nothing-here.json"
-    gate = provider_data_preflight(provider="example-hosted", hosting_mode=HOSTED, allow_hosted=False)
-
-    with pytest.raises(ReEmbedError, match="Hosted execution was not enabled"):
-        _run(absent, tmp_path / "target", egress=gate)
-
-
-def test_the_refusal_names_the_warning_the_operator_would_have_seen(source: Path, tmp_path: Path, no_network: None) -> None:
-    gate = provider_data_preflight(provider="example-hosted", hosting_mode=HOSTED, allow_hosted=False)
-
-    with pytest.raises(ReEmbedError, match=BLOCKED_WARNING):
-        _run(source, tmp_path / "target", egress=gate)
-
-
-def test_a_blocked_run_cannot_smuggle_an_embedder_past_the_gate(source: Path, tmp_path: Path, no_network: None) -> None:
-    gate = provider_data_preflight(provider="example-hosted", hosting_mode=HOSTED, allow_hosted=False)
-
-    with pytest.raises(ReEmbedError, match="Hosted execution was not enabled"):
-        _run(source, tmp_path / "target", egress=gate, embedder=build_built_in_embedder(MODEL))
-
-
-# --- the opt-in -------------------------------------------------------------
-
-
-def test_an_allowed_hosted_run_needs_an_embedder_the_operator_supplies(source: Path, tmp_path: Path, no_network: None) -> None:
-    # This package ships no hosted provider. Falling back to a local model
-    # would make the record say hosted about a run that was not.
-    gate = provider_data_preflight(provider="example-hosted", hosting_mode=HOSTED, allow_hosted=True)
-
-    with pytest.raises(ReEmbedError, match="ships no hosted provider"):
-        _run(source, tmp_path / "target", egress=gate)
-
-
-def test_an_allowed_hosted_run_reports_what_left_the_machine(source: Path, tmp_path: Path, no_network: None) -> None:
-    # The embedder stands in for an operator's hosted client. It is local and
-    # deterministic, which is what lets this assert the reporting without a
-    # network call.
+def test_false_external_opt_in_blocks_before_an_absent_source_is_read(tmp_path: Path) -> None:
     gate = provider_data_preflight(
-        provider="example-hosted",
+        executor_kind=EXTERNAL_UNVERIFIED,
+        provider="external",
+        endpoint="http://127.0.0.1:11434",
+        allow_external=False,
+    )
+    assert gate.blocked
+    with pytest.raises(ReEmbedError, match="refused before anything is read"):
+        _run(tmp_path / "does-not-exist.json", tmp_path / "target", embedder=RecordingEmbedder(), egress=gate)
+    assert not (tmp_path / "target").exists()
+
+
+def test_injected_embedder_without_external_preflight_is_refused_before_read(tmp_path: Path) -> None:
+    with pytest.raises(ReEmbedError, match="requires explicit external consent"):
+        _run(tmp_path / "does-not-exist.json", tmp_path / "target", embedder=RecordingEmbedder())
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"allowed": False},
+        {"content_leaves_machine": True},
+        {"external_execution_confirmed": True},
+        {"warnings": (BLOCKED_WARNING,)},
+    ],
+)
+def test_direct_preflight_construction_rejects_contradictions(change: dict[str, object]) -> None:
+    with pytest.raises(EgressError):
+        replace(local_egress(), **change)
+
+
+def test_hosted_execution_requires_both_consents() -> None:
+    external_missing = provider_data_preflight(
+        executor_kind=EXTERNAL_UNVERIFIED,
+        provider="hosted",
+        endpoint="https://embeddings.example",
         hosting_mode=HOSTED,
-        dataset_privacy_classification="internal",
+        dataset_privacy_classification="public",
+        allow_external=False,
         allow_hosted=True,
     )
+    hosted_missing = provider_data_preflight(
+        executor_kind=EXTERNAL_UNVERIFIED,
+        provider="hosted",
+        endpoint="https://embeddings.example",
+        hosting_mode=HOSTED,
+        dataset_privacy_classification="public",
+        allow_external=True,
+        allow_hosted=False,
+    )
+    assert external_missing.blocked and BLOCKED_WARNING in external_missing.warnings
+    assert hosted_missing.blocked and HOSTED_BLOCKED_WARNING in hosted_missing.warnings
 
-    outcome = _run(source, tmp_path / "target", egress=gate, embedder=build_built_in_embedder(MODEL))
 
+@pytest.mark.parametrize("classification", ["unknown", "confidential", "restricted"])
+def test_sensitive_or_unknown_data_is_blocked_from_hosted_execution(classification: str) -> None:
+    gate = _external_hosted(dataset_privacy_classification=classification)
+    assert gate.blocked
+    assert CLASSIFICATION_BLOCKED_WARNING in gate.warnings
+
+
+@pytest.mark.parametrize("classification", ["public", "internal"])
+def test_permitted_classifications_still_require_explicit_hosted_consent(classification: str) -> None:
+    assert _external_hosted(dataset_privacy_classification=classification).allowed
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://embeddings.example/v1",
+        "https://localhost/v1",
+        "https://127.0.0.1/v1",
+        "https://10.0.0.8/v1",
+        "https://user:secret@embeddings.example/v1",
+        "https://embeddings.example/v1?token=secret",
+        "https://embeddings.example/v1#fragment",
+    ],
+)
+def test_unsafe_hosted_endpoint_claims_are_refused_without_echoing_secrets(endpoint: str) -> None:
+    with pytest.raises(EgressError) as failure:
+        _external_hosted(endpoint=endpoint)
+    assert "secret" not in str(failure.value)
+
+
+def test_local_external_endpoint_must_be_loopback() -> None:
+    with pytest.raises(EgressError, match="loopback"):
+        _external_local(endpoint="https://embeddings.example/v1")
+
+
+def test_proxy_and_redirect_claims_are_refused() -> None:
+    with pytest.raises(EgressError, match="Proxy routing"):
+        _external_hosted(proxy_url="https://proxy.example")
+    with pytest.raises(EgressError, match="Redirect following"):
+        _external_hosted(allow_redirects=True)
+
+
+def test_untransformed_source_text_cannot_claim_redaction() -> None:
+    with pytest.raises(EgressError, match="Redaction is not implemented"):
+        _external_hosted(redaction_applied=True)
+
+
+def test_hosted_record_derives_raw_transmission_from_submitted_payloads(source: Path, tmp_path: Path) -> None:
+    outcome = _run(
+        source,
+        tmp_path / "target",
+        embedder=build_built_in_embedder(MODEL),
+        egress=_external_hosted(),
+    )
     egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
-    assert egress["remote_provider_used"] is True
-    assert egress["provider"] == "example-hosted"
-    assert egress["records_transmitted"] == outcome.retained_rebuilt
-    assert egress["raw_source_text_transmitted"] is True
-    assert egress["hosted_execution_confirmed"] is True
-    assert egress["dataset_privacy_classification"] == "internal"
-    assert UNREDACTED_WARNING in egress["warnings"]
-
-
-def test_only_retained_records_are_counted_as_transmitted(tmp_path: Path, no_network: None) -> None:
-    # Records with no source text have nothing to send, so counting them would
-    # over-report what left the machine.
-    source = build_source_store(tmp_path / "evidence", dimensions=8, missing=("gone",), deleted_by_policy=("purged",))
-    gate = provider_data_preflight(provider="example-hosted", hosting_mode=HOSTED, allow_hosted=True)
-
-    outcome = _run(source, tmp_path / "target", egress=gate, embedder=build_built_in_embedder(MODEL))
-
-    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    assert egress["execution_verification"] == "attested"
+    assert egress["network_behavior_verification"] == "attested"
+    assert egress["records_submitted_to_external_executor"] == 3
     assert egress["records_transmitted"] == 3
-    assert outcome.missing_skipped == 1
-    assert outcome.deleted_by_policy_skipped == 1
+    assert egress["raw_source_text_transmitted"] is True
+    assert egress["redaction_applied"] is False
 
 
-def test_a_redacted_hosted_run_says_the_raw_text_did_not_go(source: Path, tmp_path: Path, no_network: None) -> None:
-    gate = provider_data_preflight(
-        provider="example-hosted",
-        hosting_mode=HOSTED,
-        dataset_privacy_classification="confidential",
-        allow_hosted=True,
-        redaction_applied=True,
-    )
-
-    outcome = _run(source, tmp_path / "target", egress=gate, embedder=build_built_in_embedder(MODEL))
-
+def test_local_external_execution_is_attested_not_remote(source: Path, tmp_path: Path) -> None:
+    outcome = _run(source, tmp_path / "target", embedder=RecordingEmbedder(), egress=_external_local())
     egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
-    assert egress["raw_source_text_transmitted"] is False
-    assert egress["redaction_applied"] is True
-    # A claimed redaction silences the warning, which is why the claim itself
-    # is recorded and labelled attested rather than taken as a fact.
-    assert "warnings" not in egress
+    assert egress["records_submitted_to_external_executor"] == 3
+    assert egress["records_transmitted"] == 0
+    assert egress["remote_provider_used"] is False
+    assert egress["network_behavior_verification"] == "attested"
+    assert EXTERNAL_ATTESTED_WARNING in egress["warnings"]
 
 
-# --- the warnings -----------------------------------------------------------
+def test_missing_and_deleted_records_never_reach_the_external_executor(tmp_path: Path) -> None:
+    source = build_source_store(
+        tmp_path / "evidence",
+        texts={"kept": "retained text"},
+        missing=("missing-secret",),
+        deleted_by_policy=("deleted-secret",),
+        dimensions=8,
+    )
+    recorder = RecordingEmbedder()
+    outcome = _run(source, tmp_path / "target", embedder=recorder, egress=_external_local())
+    assert recorder.texts == ["retained text"]
+    egress = json.loads(outcome.record.read_text(encoding="utf-8"))["egress"]
+    assert egress["records_submitted_to_external_executor"] == 1
+    assert outcome.missing_skipped == outcome.deleted_by_policy_skipped == 1
 
 
-def test_the_blocked_warning_appears_only_when_hosted_and_not_allowed(no_network: None) -> None:
-    blocked = provider_data_preflight(provider="p", hosting_mode=HOSTED, allow_hosted=False)
-    allowed = provider_data_preflight(provider="p", hosting_mode=HOSTED, allow_hosted=True)
+def test_source_text_and_secrets_are_absent_from_executor_diagnostics(source: Path, tmp_path: Path) -> None:
+    class LeakingFailure(RecordingEmbedder):
+        def embed(self, text: str) -> list[float]:
+            raise RuntimeError(f"provider token super-secret; source={text}")
 
-    assert BLOCKED_WARNING in blocked.warnings
-    assert BLOCKED_WARNING not in allowed.warnings
-    assert BLOCKED_WARNING not in local_egress().warnings
-
-
-@pytest.mark.parametrize("classification", ("internal", "confidential", "restricted"))
-def test_private_content_raises_the_unredacted_warning(classification: str, no_network: None) -> None:
-    gate = provider_data_preflight(provider="p", hosting_mode=HOSTED, dataset_privacy_classification=classification, allow_hosted=True)
-
-    assert UNREDACTED_WARNING in gate.warnings
+    with pytest.raises(ReEmbedError) as failure:
+        _run(source, tmp_path / "target", embedder=LeakingFailure(), egress=_external_local())
+    message = str(failure.value)
+    assert "super-secret" not in message
+    assert "Reset the password" not in message
+    assert message == "The external executor failed while processing a source record."
 
 
-@pytest.mark.parametrize("classification", ("public", "unknown"))
-def test_open_content_does_not_raise_the_unredacted_warning(classification: str, no_network: None) -> None:
-    gate = provider_data_preflight(provider="p", hosting_mode=HOSTED, dataset_privacy_classification=classification, allow_hosted=True)
+def test_resume_keeps_distinct_external_submission_count_consistent(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={f"r{i}": f"text {i}" for i in range(5)}, dimensions=8)
+    target = tmp_path / "target"
+    gate = _external_local()
+    with pytest.raises(KeyboardInterrupt):
+        _run(source, target, batch_size=2, embedder=InterruptingEmbedder(2), egress=gate)
 
-    assert UNREDACTED_WARNING not in gate.warnings
+    resumed = _run(source, target, batch_size=2, embedder=RecordingEmbedder(), egress=gate)
+    egress = json.loads(resumed.record.read_text(encoding="utf-8"))["egress"]
+    assert resumed.resumed
+    assert egress["records_submitted_to_external_executor"] == 5
+    assert egress["records_transmitted"] == 0
 
 
-def test_telemetry_raises_its_warning_even_on_a_local_run(no_network: None) -> None:
-    gate = provider_data_preflight(telemetry_enabled=True)
+def test_resume_cannot_switch_external_executor_context(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={f"r{i}": f"text {i}" for i in range(4)}, dimensions=8)
+    target = tmp_path / "target"
+    with pytest.raises(KeyboardInterrupt):
+        _run(source, target, batch_size=2, embedder=InterruptingEmbedder(2), egress=_external_local())
+    changed = _external_local(provider="other-local-executor")
+    with pytest.raises(ReEmbedError, match="different executor or consent context"):
+        _run(source, target, batch_size=2, embedder=RecordingEmbedder(), egress=changed)
 
+
+def test_local_builtin_cannot_report_external_payloads() -> None:
+    with pytest.raises(EgressError, match="cannot report external payloads"):
+        local_egress().to_document(records_submitted=1)
+
+
+def test_default_classification_is_unknown_without_making_hosted_unknown_safe() -> None:
+    assert DEFAULT_CLASSIFICATION == "unknown"
+    assert local_egress().dataset_privacy_classification == "unknown"
+    assert _external_hosted(dataset_privacy_classification="unknown").blocked
+
+
+def test_telemetry_is_attested_and_warned_for_external_execution() -> None:
+    gate = _external_local(telemetry_enabled=True)
     assert TELEMETRY_WARNING in gate.warnings
-    assert not gate.content_leaves_machine
+    assert gate.telemetry_enabled
 
 
-def test_the_warning_wordings_match_the_benchmarking_tool(no_network: None) -> None:
-    # PrivateAIStack and ModelSwapBench take no dependency on each other, so
-    # these sentences are restated rather than imported. An operator who has
-    # read one tool's warning should not have to learn a second wording for the
-    # same risk, and this test is where a drift between them shows.
-    assert BLOCKED_WARNING == "hosted execution is blocked until explicitly enabled"
-    assert UNREDACTED_WARNING == ("private unredacted dataset content would be transmitted to a hosted provider")
-    assert TELEMETRY_WARNING == "telemetry is enabled; review exported fields before execution"
-
-
-# --- refused settings -------------------------------------------------------
-
-
-def test_a_hosted_run_must_name_its_provider(no_network: None) -> None:
-    with pytest.raises(EgressError, match="must name its provider"):
-        provider_data_preflight(hosting_mode=HOSTED, allow_hosted=True)
-
-
-def test_a_local_run_must_not_name_a_provider(no_network: None) -> None:
-    # Either a mistake, or a claim the record would carry with nothing behind it.
-    with pytest.raises(EgressError, match="must not name a provider"):
-        provider_data_preflight(provider="example-hosted", hosting_mode=LOCAL)
-
-
-@pytest.mark.parametrize("mode", ("serverless", "", "HOSTED"))
-def test_an_unknown_hosting_mode_is_refused(mode: str, no_network: None) -> None:
-    with pytest.raises(EgressError, match="hosting_mode must be one of"):
-        provider_data_preflight(hosting_mode=mode)
-
-
-def test_an_unknown_classification_is_refused(no_network: None) -> None:
-    with pytest.raises(EgressError, match="dataset_privacy_classification must be one of"):
-        provider_data_preflight(dataset_privacy_classification="top-secret")
-
-
-def test_an_oversized_provider_name_is_refused(no_network: None) -> None:
-    with pytest.raises(EgressError, match="must name its provider"):
-        provider_data_preflight(provider="x" * 129, hosting_mode=HOSTED, allow_hosted=True)
-
-
-def test_a_run_that_sent_nothing_cannot_report_transmitted_records(no_network: None) -> None:
-    with pytest.raises(EgressError, match="cannot report transmitted records"):
-        local_egress().to_document(records_transmitted=5)
-
-
-def test_a_negative_transmitted_count_is_refused(no_network: None) -> None:
-    with pytest.raises(EgressError, match="cannot be negative"):
-        local_egress().to_document(records_transmitted=-1)
-
-
-def test_a_hosted_run_that_sent_zero_records_reports_no_provider(no_network: None) -> None:
-    # Allowed, but nothing went, so the record must not claim a remote run.
-    # The suite's reader refuses a local-looking run that names a provider.
-    gate = provider_data_preflight(provider="example-hosted", hosting_mode=HOSTED, allow_hosted=True)
-
-    document = gate.to_document(records_transmitted=0)
-
-    assert document["remote_provider_used"] is False
-    assert "provider" not in document
-    assert document["hosting_mode"] == "hosted"
-    assert document["hosted_execution_confirmed"] is True
+def test_embedder_protocol_remains_structurally_compatible() -> None:
+    assert isinstance(RecordingEmbedder(), Embedder)

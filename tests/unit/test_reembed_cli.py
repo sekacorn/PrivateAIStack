@@ -318,7 +318,7 @@ def test_a_hosted_run_without_allow_hosted_exits_two(source: Path, tmp_path: Pat
     result = _egress_run(source, tmp_path / "target", "--hosting-mode", "hosted", "--provider", "example-hosted")
 
     assert result.exit_code == 2
-    assert "Hosted execution was not enabled" in result.output
+    assert "External execution was not enabled" in result.output
     assert not (tmp_path / "target" / "re-embed-record.json").exists()
 
 
@@ -338,18 +338,23 @@ def test_an_allowed_hosted_run_from_the_cli_says_no_provider_ships(source: Path,
         "hosted",
         "--provider",
         "example-hosted",
+        "--endpoint",
+        "https://embeddings.example/v1",
+        "--data-classification",
+        "public",
+        "--allow-external",
         "--allow-hosted",
     )
 
     assert result.exit_code == 2
-    assert "ships no hosted provider" in result.output
+    assert "needs an injected embedder" in result.output
 
 
 def test_a_local_run_naming_a_provider_exits_two(source: Path, tmp_path: Path) -> None:
     result = _egress_run(source, tmp_path / "target", "--provider", "example-hosted")
 
     assert result.exit_code == 2
-    assert "must not name a provider" in result.output
+    assert "local_builtin executor cannot declare" in result.output
 
 
 def test_an_unknown_classification_exits_two(source: Path, tmp_path: Path) -> None:
@@ -358,11 +363,8 @@ def test_an_unknown_classification_exits_two(source: Path, tmp_path: Path) -> No
     assert result.exit_code == 2
 
 
-def test_telemetry_is_warned_about_and_recorded(source: Path, tmp_path: Path) -> None:
+def test_local_builtin_cannot_claim_provider_telemetry(source: Path, tmp_path: Path) -> None:
     result = _egress_run(source, tmp_path / "target", "--telemetry-enabled")
 
-    assert result.exit_code == 0, result.output
-    assert "telemetry is enabled" in result.output
-    record = json.loads((tmp_path / "target" / "re-embed-record.json").read_text(encoding="utf-8"))
-    assert record["egress"]["telemetry_enabled"] is True
-    assert record["egress"]["warnings"] == ["telemetry is enabled; review exported fields before execution"]
+    assert result.exit_code == 2
+    assert "cannot claim external consent or provider telemetry" in result.output

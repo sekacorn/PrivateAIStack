@@ -313,77 +313,62 @@ The fields beyond `status`, `query_set_size` and `top_k` are additive within
 block refuses unknown fields. Reading a record this command writes needs
 **ai-infrastructure-suite 0.1.0b3 or later**.
 
-## What leaves the machine
+## Executor trust and data movement
 
-Re-embedding sends source text to a model, which the evidence work in 3a never
-did. That is the sharpest new risk in the phase, so it has a gate rather than a
-convention.
+Re-embedding passes source text to an embedder. The privacy gate distinguishes
+who owns that code before it reads the evidence document or any source file:
 
-**The default is local.** Nothing opens a socket, and tests assert that by
-replacing `socket.socket` with something that fails the test if anything
-touches it, rather than by trusting that nothing did.
+- `local_builtin` is selected from this package's registry. The implementation
+  is deterministic package code. This is not an OS-level network-isolation
+  claim.
+- `external_unverified` is any injected executor, including an object whose
+  class resembles a built-in, a local service, a provider SDK, or hosted code.
+  Its endpoint, proxy, redirect, telemetry, and network behaviour are operator
+  attestations that this package cannot verify.
 
-**A hosted run needs two things said out loud**, and a third that this package
-does not provide:
+An injected executor needs `allow_external=True`. Hosted execution additionally
+needs `allow_hosted=True`, an HTTPS endpoint declaration, and a `public` or
+`internal` classification. `unknown`, `confidential`, and `restricted` source
+data are blocked from hosted execution even when both consent flags are true.
+The refusal occurs before the evidence document is opened.
 
-```
-privateaistack reembed run ./evidence/embedding-portability.json ...   --hosting-mode hosted --provider example-hosted   --data-classification confidential --allow-hosted
-```
+The CLI exposes the same preflight flags, but it does not ship an injected or
+hosted provider, so an allowed external CLI run stops before reading source
+data and explains that an injected embedder is required.
 
-| Flag | Default | Means |
+| Flag | Default | Meaning |
 |---|---|---|
-| `--hosting-mode` | `local` | `local` opens no socket at all. |
-| `--provider` | none | Required for, and only for, a hosted run. Naming one on a local run is refused. |
-| `--allow-hosted` | off | The explicit opt-in. Without it a hosted run is refused **before the evidence document is opened**. |
-| `--data-classification` | `unknown` | The operator's classification. Attested, never checked. |
-| `--redaction-applied` | off | An attestation that the text was redacted. Attested, never checked. |
-| `--telemetry-enabled` | off | Recorded, and warned about even on a local run. |
+| `--hosting-mode` | `local` | Declared location. It is not proof of isolation. |
+| `--provider` | none | External executor identifier. |
+| `--endpoint` | none | Declared endpoint; only its normalized origin is retained. Actual use remains attested. |
+| `--allow-external` | off | Explicit permission to invoke injected code. |
+| `--allow-hosted` | off | Additional permission for hosted execution. |
+| `--data-classification` | `unknown` | Operator-attested classification. Hosted `unknown`, `confidential`, and `restricted` data is blocked. |
+| `--telemetry-enabled` | off | External provider telemetry attestation and warning. |
 
-The refusal happens before any file is read, so it cannot depend on anything
-the input says — a test passes a path that does not exist and still gets the
-egress refusal, for the right reason.
+No redaction transform exists in this checkpoint. A caller therefore cannot
+claim source text was redacted. Proxy routing and redirect following are also
+unsupported declarations. Arbitrary external code could still use them, which
+is why its network behaviour stays `attested` rather than verified.
 
-**This package ships no hosted provider.** An allowed hosted run needs an
-embedder supplied in code. Falling back to a local model would make the record
-say `hosted` about a run that was not, so it is refused instead. From the CLI a
-hosted run therefore always stops at that boundary, which is the honest place
-for an operator to meet it.
+### Evidence semantics
 
-### Every run records what left
+Every run writes an `egress` block. `records_submitted_to_external_executor` is
+derived from distinct records in completed batches. A hosted run copies that
+actual count to `records_transmitted` and records
+`raw_source_text_transmitted: true`; no operator flag can turn it false.
+`missing` and `deleted_by_policy` records never enter a batch and are never
+submitted.
 
-The `egress` block is written on every run, so its absence can never be
-mistaken for a local run. A hosted run records the provider, the count, whether
-raw text went, the opt-in, the classification, the redaction claim, the
-telemetry state, and the preflight warnings the operator was shown.
+Checkpoints are bound to the executor kind, provider, endpoint origin,
+classification, and consent context. A resume cannot switch those declarations
+and then attribute earlier batches to a different executor. The count is the
+number of distinct records represented by durable completed batches, not a
+provider request count; a crash before a checkpoint may cause a provider retry.
 
-`records_transmitted` counts records actually embedded, not planned: records
-whose source text is `missing` or `deleted_by_policy` have nothing to send, so
-counting them would over-report what left.
-
-Two of those fields are attested and appear in the suite's `attested_claims`.
-No scanner can read source text and tell whether an organisation considers it
-confidential, or whether a redaction removed what the operator thinks it
-removed.
-
-The rule that a run cannot report transmitting content nobody enabled lives in
-the suite's reader as well as in this gate, so a tool that skipped its own
-check still cannot produce a readable record of having done so.
-
-### The warnings are the same sentences ModelSwapBench uses
-
-`hosted execution is blocked until explicitly enabled`,
-`private unredacted dataset content would be transmitted to a hosted provider`
-and `telemetry is enabled; review exported fields before execution` are
-restated here verbatim, because the two projects take no dependency on each
-other and an operator who has read one tool's warning should not have to learn
-a second wording for the same risk. A test pins the strings.
-
-One wording is worth naming rather than quietly changing: the unredacted
-warning is silenced by a classification of `public` **or** `unknown`, which is
-what ModelSwapBench does. `unknown` is the weaker of the two, and it is also
-the default, so a hosted run with no classification given does not raise that
-warning. Changing it would mean the two tools disagreeing, which is the worse
-problem.
+For `local_builtin`, the record says `registry_owned`. For
+`external_unverified`, execution and network behaviour say `attested`. Neither
+label proves authenticity, provenance, or OS-enforced network isolation.
 
 ## What this does not do yet
 
@@ -396,8 +381,8 @@ problem.
   was attempted and found insufficient; `run` attempts nothing, so the honest
   output is silence. `reembed quality` adds the block when it is asked to.
 - **No remote cost estimate.** The local estimate landed in 3b-3; a remote
-  provider's token cost needs the egress opt-in of 3b-5, because the
-  calibration sample itself would transmit source text.
+  calibration with an injected executor uses the same consent gate and records
+  how many sample payloads were submitted.
 
 Records whose source text is `missing` or `deleted_by_policy` have no text to
 send to any model. They are never embedded, never appear in the rebuilt store,

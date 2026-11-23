@@ -160,9 +160,29 @@
       "additionalProperties": false,
       "required": ["remote_provider_used", "records_transmitted", "raw_source_text_transmitted"],
       "properties": {
+        "executor_kind": { "enum": ["local_builtin", "external_unverified"] },
+        "execution_verification": { "enum": ["registry_owned", "attested"] },
         "remote_provider_used": { "type": "boolean" },
+        "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "executor_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "endpoint_origin": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "network_behavior_verification": { "const": "attested" },
         "records_transmitted": { "type": "integer", "minimum": 0 },
-        "raw_source_text_transmitted": { "type": "boolean" }
+        "records_submitted_to_external_executor": { "type": "integer", "minimum": 0 },
+        "raw_source_text_transmitted": { "type": "boolean" },
+        "hosting_mode": { "enum": ["local", "hosted"] },
+        "external_execution_confirmed": { "type": "boolean" },
+        "hosted_execution_confirmed": { "type": "boolean" },
+        "dataset_privacy_classification": {
+          "enum": ["public", "internal", "confidential", "restricted", "unknown"]
+        },
+        "redaction_applied": { "const": false },
+        "telemetry_enabled": { "type": "boolean" },
+        "warnings": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
       }
     },
     "limits": {

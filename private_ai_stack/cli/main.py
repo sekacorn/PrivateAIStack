@@ -28,6 +28,8 @@ from private_ai_stack.reembed import (
     DEFAULT_SAMPLE_SIZE,
     DEFAULT_SEED,
     DEFAULT_TOP_K,
+    EXTERNAL_UNVERIFIED,
+    LOCAL_BUILTIN,
     PRIVACY_CLASSIFICATIONS,
     SEEDED_RANDOM,
     CheckpointError,
@@ -657,10 +659,9 @@ def reembed_run(
     ] = None,
     batch_size: Annotated[int, typer.Option("--batch-size", help="Records per batch and per shard.")] = DEFAULT_BATCH_SIZE,
     output: Annotated[Path | None, typer.Option("--estimate-output", help="Also write the estimate document here.")] = None,
-    hosting_mode: Annotated[str, typer.Option("--hosting-mode", help="local or hosted. Local opens no socket at all.")] = "local",
-    provider: Annotated[
-        str | None, typer.Option("--provider", help="The hosted provider. Required for, and only for, a hosted run.")
-    ] = None,
+    hosting_mode: Annotated[str, typer.Option("--hosting-mode", help="Declared executor location: local or hosted.")] = "local",
+    provider: Annotated[str | None, typer.Option("--provider", help="External executor identifier. Required for hosted execution.")] = None,
+    endpoint: Annotated[str | None, typer.Option("--endpoint", help="Declared external endpoint. Its actual use remains attested.")] = None,
     data_classification: Annotated[
         str,
         typer.Option(
@@ -668,12 +669,13 @@ def reembed_run(
             help=f"The operator's classification of the source text. One of {', '.join(sorted(PRIVACY_CLASSIFICATIONS))}.",
         ),
     ] = DEFAULT_CLASSIFICATION,
+    allow_external: Annotated[
+        bool,
+        typer.Option("--allow-external", help="Explicitly permit an injected executor. Off by default."),
+    ] = False,
     allow_hosted: Annotated[
         bool,
         typer.Option("--allow-hosted", help="Explicitly permit source text to leave the machine. Off by default."),
-    ] = False,
-    redaction_applied: Annotated[
-        bool, typer.Option("--redaction-applied", help="Attest that the transmitted text was redacted. Never checked.")
     ] = False,
     telemetry_enabled: Annotated[
         bool, typer.Option("--telemetry-enabled", help="Record that provider telemetry was left on for the run.")
@@ -685,19 +687,22 @@ def reembed_run(
     ``--estimate-only`` embeds the calibration sample and nothing else: no
     shard, no checkpoint and no rebuilt store are written.
 
-    The default is local: no socket is opened. A hosted run needs both
-    ``--hosting-mode hosted`` and ``--allow-hosted``, and an embedder supplied
-    in code, because this package ships no hosted provider.
+    The default uses a registry-owned local embedder. The package does not
+    claim OS-level network isolation. Hosted execution requires explicit
+    external and hosted consent, and an embedder supplied in code because the
+    CLI ships no hosted provider.
     """
     try:
         identity = ModelIdentity(id=model_id, revision=model_revision, dimensions=dimensions)
         egress = provider_data_preflight(
+            executor_kind=EXTERNAL_UNVERIFIED if hosting_mode == "hosted" else LOCAL_BUILTIN,
             provider=provider,
+            endpoint=endpoint,
             hosting_mode=hosting_mode,
             dataset_privacy_classification=data_classification,
+            allow_external=allow_external,
             allow_hosted=allow_hosted,
             telemetry_enabled=telemetry_enabled,
-            redaction_applied=redaction_applied,
         )
         for warning in egress.warnings:
             # Printed before the run, to stderr, so an operator sees it whether
@@ -712,6 +717,7 @@ def reembed_run(
                 sample_size=sample_size,
                 sample_seed=sample_seed,
                 cost_profile=profile,
+                egress=egress,
                 output=None if output is None else output.expanduser().resolve(),
             )
             print_json(estimate.to_document())

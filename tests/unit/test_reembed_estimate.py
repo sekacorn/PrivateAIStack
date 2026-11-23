@@ -21,6 +21,7 @@ from private_ai_stack.reembed.estimate import (
     load_cost_profile,
 )
 from private_ai_stack.reembed.evidence import EvidenceError
+from private_ai_stack.reembed.privacy import EXTERNAL_UNVERIFIED, provider_data_preflight
 from tests.unit.reembed_support import build_source_store
 
 MODEL = ModelIdentity(id="privateaistack.hashed-bow.sha256-signed", revision="1", dimensions=16)
@@ -65,6 +66,13 @@ def _estimate(source_document: Path, **overrides: Any) -> Any:
         "sample_size": 3,
     }
     arguments.update(overrides)
+    if arguments.get("embedder") is not None and "egress" not in arguments:
+        arguments["egress"] = provider_data_preflight(
+            executor_kind=EXTERNAL_UNVERIFIED,
+            provider="test-local-executor",
+            endpoint="http://127.0.0.1:11434/embed",
+            allow_external=True,
+        )
     return estimate_re_embed(**arguments)
 
 
@@ -168,13 +176,12 @@ def test_the_document_never_claims_cost_without_a_profile(source: Path) -> None:
     assert "no local cost profile" in document["cost"]["reason"].lower()
 
 
-def test_the_document_never_claims_egress(source: Path) -> None:
+def test_the_builtin_estimate_records_registry_owned_local_execution(source: Path) -> None:
     document = _estimate(source, sample_size=2).to_document()
-    assert document["egress"] == {
-        "remote_provider_used": False,
-        "records_transmitted": 0,
-        "raw_source_text_transmitted": False,
-    }
+    assert document["egress"]["executor_kind"] == "local_builtin"
+    assert document["egress"]["execution_verification"] == "registry_owned"
+    assert document["egress"]["records_submitted_to_external_executor"] == 0
+    assert document["egress"]["records_transmitted"] == 0
 
 
 def test_the_limits_always_say_the_figure_is_not_a_quotation(source: Path) -> None:
@@ -328,15 +335,19 @@ def test_an_embedder_without_a_tokenizer_gets_a_labelled_whitespace_count(source
     assert "whitespace" in estimate.calibration.tokenizer
 
 
-def test_an_estimate_opens_no_socket(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import socket
+def test_a_custom_estimate_records_actual_sample_submissions(source: Path) -> None:
+    class _Opaque:
+        @property
+        def identity(self) -> ModelIdentity:
+            return MODEL
 
-    def _forbidden(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("An estimate must not open a socket.")
+        def embed(self, text: str) -> list[float]:
+            return [0.0] * MODEL.dimensions
 
-    monkeypatch.setattr(socket, "socket", _forbidden)
-    monkeypatch.setattr(socket, "create_connection", _forbidden)
-    assert _estimate(source, sample_size=2).records_to_embed == 5
+    document = _estimate(source, sample_size=2, embedder=_Opaque()).to_document()
+    assert document["egress"]["executor_kind"] == EXTERNAL_UNVERIFIED
+    assert document["egress"]["records_submitted_to_external_executor"] == 2
+    assert document["egress"]["records_transmitted"] == 0
 
 
 def test_a_cost_profile_is_read_from_json(tmp_path: Path) -> None:
