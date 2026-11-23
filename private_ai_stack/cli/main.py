@@ -22,13 +22,18 @@ from private_ai_stack.reembed import (
     DEFAULT_ANCHOR_COUNT,
     DEFAULT_BATCH_SIZE,
     DEFAULT_CANDIDATE_POOL,
+    DEFAULT_CLASSIFICATION,
     DEFAULT_MINIMUM_SAMPLE_SIZE,
     DEFAULT_SAMPLE_SEED,
     DEFAULT_SAMPLE_SIZE,
     DEFAULT_SEED,
     DEFAULT_TOP_K,
+    EXTERNAL_UNVERIFIED,
+    LOCAL_BUILTIN,
+    PRIVACY_CLASSIFICATIONS,
     SEEDED_RANDOM,
     CheckpointError,
+    EgressError,
     EmbedderError,
     EstimateError,
     EvidenceError,
@@ -43,6 +48,7 @@ from private_ai_stack.reembed import (
     load_cost_profile,
     load_query_set,
     load_vector_store,
+    provider_data_preflight,
     re_embed_store,
 )
 
@@ -653,15 +659,55 @@ def reembed_run(
     ] = None,
     batch_size: Annotated[int, typer.Option("--batch-size", help="Records per batch and per shard.")] = DEFAULT_BATCH_SIZE,
     output: Annotated[Path | None, typer.Option("--estimate-output", help="Also write the estimate document here.")] = None,
+    hosting_mode: Annotated[str, typer.Option("--hosting-mode", help="Declared executor location: local or hosted.")] = "local",
+    provider: Annotated[str | None, typer.Option("--provider", help="External executor identifier. Required for hosted execution.")] = None,
+    endpoint: Annotated[str | None, typer.Option("--endpoint", help="Declared external endpoint. Its actual use remains attested.")] = None,
+    data_classification: Annotated[
+        str,
+        typer.Option(
+            "--data-classification",
+            help=f"The operator's classification of the source text. One of {', '.join(sorted(PRIVACY_CLASSIFICATIONS))}.",
+        ),
+    ] = DEFAULT_CLASSIFICATION,
+    allow_external: Annotated[
+        bool,
+        typer.Option("--allow-external", help="Explicitly permit an injected executor. Off by default."),
+    ] = False,
+    allow_hosted: Annotated[
+        bool,
+        typer.Option("--allow-hosted", help="Explicitly permit source text to leave the machine. Off by default."),
+    ] = False,
+    telemetry_enabled: Annotated[
+        bool, typer.Option("--telemetry-enabled", help="Record that provider telemetry was left on for the run.")
+    ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", help="Show raw exceptions.")] = False,
 ) -> None:
     """Rebuild a store with a different model, or estimate what that would cost.
 
     ``--estimate-only`` embeds the calibration sample and nothing else: no
     shard, no checkpoint and no rebuilt store are written.
+
+    The default uses a registry-owned local embedder. The package does not
+    claim OS-level network isolation. Hosted execution requires explicit
+    external and hosted consent, and an embedder supplied in code because the
+    CLI ships no hosted provider.
     """
     try:
         identity = ModelIdentity(id=model_id, revision=model_revision, dimensions=dimensions)
+        egress = provider_data_preflight(
+            executor_kind=EXTERNAL_UNVERIFIED if hosting_mode == "hosted" else LOCAL_BUILTIN,
+            provider=provider,
+            endpoint=endpoint,
+            hosting_mode=hosting_mode,
+            dataset_privacy_classification=data_classification,
+            allow_external=allow_external,
+            allow_hosted=allow_hosted,
+            telemetry_enabled=telemetry_enabled,
+        )
+        for warning in egress.warnings:
+            # Printed before the run, to stderr, so an operator sees it whether
+            # or not the run goes ahead and whether or not they are piping JSON.
+            typer.echo(f"egress warning: {warning}", err=True)
         profile = load_cost_profile(cost_profile.expanduser().resolve()) if cost_profile is not None else None
         if estimate_only:
             estimate = estimate_re_embed(
@@ -671,6 +717,7 @@ def reembed_run(
                 sample_size=sample_size,
                 sample_seed=sample_seed,
                 cost_profile=profile,
+                egress=egress,
                 output=None if output is None else output.expanduser().resolve(),
             )
             print_json(estimate.to_document())
@@ -683,6 +730,7 @@ def reembed_run(
             target_model=identity,
             availability=availability,
             batch_size=batch_size,
+            egress=egress,
         )
         print_json(
             {
@@ -699,7 +747,7 @@ def reembed_run(
                 "complete": outcome.complete,
             }
         )
-    except (EstimateError, EmbedderError, EvidenceError, ReEmbedError, CheckpointError) as exc:
+    except (EstimateError, EmbedderError, EvidenceError, ReEmbedError, CheckpointError, EgressError) as exc:
         handle_error(CliError(str(exc), INVALID_INPUT), verbose)
     except Exception as exc:
         handle_error(exc, verbose)

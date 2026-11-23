@@ -44,8 +44,10 @@ Commands use subprocess argument arrays and do not interpolate shell strings.
 
 Rebuilding a vector store with a different embedding model, and comparing what
 the rebuild retrieves. These commands do not touch a deployment: they read
-`embedding-portability.v1` evidence documents and write files. Nothing in them
-opens a socket or loads weights, and a test asserts it.
+`embedding-portability.v1` evidence documents and write files. The default
+embedder is registry-owned deterministic package code; this is not a claim of
+OS-level network isolation. Any injected executor requires a validated
+`external_unverified` preflight before source files are read.
 
 ```bash
 privateaistack reembed run --help
@@ -77,6 +79,13 @@ privateaistack reembed run ./evidence/embedding-portability.json   --source-stor
 | `--dimensions` | Target model dimensions. **Never defaulted**, because model identity is the triple id + revision + dimensions and the same scheme at two dimensions is two models. |
 | `--availability` | `open_weight_self_hostable` or `vendor_only`. An operator attestation no offline check can confirm, so it has no default either. |
 | `--batch-size` | Records per batch and per shard. Default 64. |
+| `--hosting-mode` | Declared executor location, `local` or `hosted`; not an isolation claim. |
+| `--provider` | External executor identifier. |
+| `--endpoint` | Declared endpoint; actual external routing remains attested. |
+| `--allow-external` | Explicit consent to invoke an injected executor. |
+| `--allow-hosted` | Additional consent for hosted execution. |
+| `--data-classification` | Operator-attested classification. Hosted `unknown`, `confidential`, and `restricted` data is blocked. |
+| `--telemetry-enabled` | Records external provider telemetry as an attested warning. |
 
 Re-running the same command against the same target directory resumes an
 interrupted run rather than starting over, and reports `resumed: true`. A batch

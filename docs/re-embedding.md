@@ -313,19 +313,138 @@ The fields beyond `status`, `query_set_size` and `top_k` are additive within
 block refuses unknown fields. Reading a record this command writes needs
 **ai-infrastructure-suite 0.1.0b3 or later**.
 
+## Executor trust and data movement
+
+Re-embedding passes source text to an embedder. The privacy gate distinguishes
+who owns that code before it reads the evidence document or any source file:
+
+- `local_builtin` is selected from this package's registry. The implementation
+  is deterministic package code. This is not an OS-level network-isolation
+  claim.
+- `external_unverified` is any injected executor, including an object whose
+  class resembles a built-in, a local service, a provider SDK, or hosted code.
+  Its endpoint, proxy, redirect, telemetry, and network behaviour are operator
+  attestations that this package cannot verify.
+
+An injected executor needs `allow_external=True`. Hosted execution additionally
+needs `allow_hosted=True`, an HTTPS endpoint declaration, and a `public` or
+`internal` classification. `unknown`, `confidential`, and `restricted` source
+data are blocked from hosted execution even when both consent flags are true.
+The refusal occurs before the evidence document is opened.
+
+The CLI exposes the same preflight flags, but it does not ship an injected or
+hosted provider, so an allowed external CLI run stops before reading source
+data and explains that an injected embedder is required.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--hosting-mode` | `local` | Declared location. It is not proof of isolation. |
+| `--provider` | none | External executor identifier. |
+| `--endpoint` | none | Declared endpoint; only its normalized origin is retained. Actual use remains attested. |
+| `--allow-external` | off | Explicit permission to invoke injected code. |
+| `--allow-hosted` | off | Additional permission for hosted execution. |
+| `--data-classification` | `unknown` | Operator-attested classification. Hosted `unknown`, `confidential`, and `restricted` data is blocked. |
+| `--telemetry-enabled` | off | External provider telemetry attestation and warning. |
+
+No redaction transform exists in this checkpoint. A caller therefore cannot
+claim source text was redacted. Proxy routing and redirect following are also
+unsupported declarations. Arbitrary external code could still use them, which
+is why its network behaviour stays `attested` rather than verified.
+
+### Evidence semantics
+
+Every run writes an `egress` block. `records_submitted_to_external_executor` is
+derived from distinct records in completed batches. A hosted run copies that
+actual count to `records_transmitted` and records
+`raw_source_text_transmitted: true`; no operator flag can turn it false.
+`missing` and `deleted_by_policy` records never enter a batch and are never
+submitted.
+
+#### Submission is not delivery
+
+This package hands a payload to a callable. It cannot observe what that
+callable does next, so it never knows that a provider received anything.
+
+`records_transmitted` keeps its established name because readers and the
+shipped schema already use it, but it is **submission accounting**, and the
+qualifier travels with the number rather than living only in prose:
+
+| Field | Value | Says |
+|---|---|---|
+| `transmission_basis` | `handed_to_executor` | The count is records this pipeline passed to the executor callable. |
+| `transmission_basis` | `no_transmission` | A registry-owned embedder ran; nothing was handed to anything. |
+| `transmission_accounting` | `distinct_records_in_completed_batches` | Exactly what the number counts. |
+| `transmission_attempts_may_exceed_count` | `true` | Attempts can be higher than the count. See below. |
+| `delivery_verification` | `unverified` | No provider delivery was established. There is no other value. |
+
+The last three appear only for an external executor, because a registry-owned
+run has no handover to qualify.
+
+The count is exact for what it names and is **not** a count of attempts. Two
+things can push attempts above it, and both are stated rather than implied:
+an executor may retry internally where this package cannot see it, and a crash
+before a checkpoint reaches disk discards a batch whose records were already
+handed over, so a resume hands them again. A test drives exactly that case and
+asserts the re-handover happens while the distinct count stays correct.
+
+Nothing in a written record can say a provider received a record. The operator
+is also warned before the run: `records handed to an external executor are not
+confirmed delivered to any provider`.
+
+#### The suite has to be able to read this
+
+PrivateAIStack and the AI Infrastructure Suite take no code dependency on each
+other. The contract between them is the `re-embed-record.v1` document, and
+nothing used to check it: this package came to emit twenty-one egress fields
+against a reader that knew ten, so every record it wrote was rejected outright
+and no test noticed.
+
+The `suite-contract` CI job closes that. It installs the suite from its `main`
+branch and validates **every** record variant this package emits — registry
+owned, external-local and hosted — through both the suite's reader and its
+shipped JSON Schema, failing on any field the installed suite does not know.
+Both halves are checked because they fail differently: the reader enforces
+cross-field consistency a schema cannot express, and the schema enforces the
+field inventory through `additionalProperties: false`.
+
+The job also asserts that an injected unknown field *is* refused by both, so a
+pass means the check still has teeth rather than that it has quietly stopped
+looking.
+
+The suite is not a declared dependency of this package — that would invert the
+layering — so `tests/contract` skips when it is absent and the offline matrix
+stays offline. Run it locally with:
+
+```
+pip install -e ".[dev]" jsonschema
+pip install "git+https://github.com/sekacorn/AI-Infrastructure-Suite.git@main"
+pytest --no-cov tests/contract
+```
+
+#### Resume binding
+
+Checkpoints are bound to the executor kind, provider, endpoint origin,
+classification, and consent context. A resume cannot switch those declarations
+and then attribute earlier batches to a different executor. The binding is by
+digest, so the checkpoint does not echo the endpoint it commits to.
+
+For `local_builtin`, the record says `registry_owned`. For
+`external_unverified`, execution and network behaviour say `attested`. Neither
+label proves authenticity, provenance, or OS-enforced network isolation.
+
 ## What this does not do yet
 
-- **No network.** Nothing here opens a socket or loads weights, and a test
-  asserts it. Remote providers arrive in 3b-5 behind an explicit opt-in. The
-  `egress` block is written now, always, so a later remote run has nowhere to
-  hide: a reader cannot mistake a missing block for a local run.
+- **No hosted provider ships here.** The gate, the seam and the record are
+  here; choosing a vendor, writing its client and taking a runtime dependency
+  on an HTTP library are decisions for whoever is doing the sending. A hosted
+  run needs an embedder supplied in code and is refused without one.
 - **No quality claim from `reembed run`.** A record `run` writes has no
   `quality` block at all. `not_measured` is a claim about a measurement that
   was attempted and found insufficient; `run` attempts nothing, so the honest
   output is silence. `reembed quality` adds the block when it is asked to.
 - **No remote cost estimate.** The local estimate landed in 3b-3; a remote
-  provider's token cost needs the egress opt-in of 3b-5, because the
-  calibration sample itself would transmit source text.
+  calibration with an injected executor uses the same consent gate and records
+  how many sample payloads were submitted.
 
 Records whose source text is `missing` or `deleted_by_policy` have no text to
 send to any model. They are never embedded, never appear in the rebuilt store,

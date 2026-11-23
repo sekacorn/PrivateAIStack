@@ -296,3 +296,128 @@ def test_the_quality_command_is_discoverable() -> None:
 
     assert result.exit_code == 0
     assert "quality" in result.output
+
+
+# --- egress flags -----------------------------------------------------------
+
+
+def _egress_run(source: Path, target: Path, *extra: str) -> Any:
+    return runner.invoke(app, _arguments(source, target) + list(extra))
+
+
+def test_a_run_is_local_unless_told_otherwise(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target")
+
+    assert result.exit_code == 0, result.output
+    record = json.loads((tmp_path / "target" / "re-embed-record.json").read_text(encoding="utf-8"))
+    assert record["egress"]["hosting_mode"] == "local"
+    assert record["egress"]["remote_provider_used"] is False
+
+
+def test_a_hosted_run_without_allow_hosted_exits_two(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--hosting-mode", "hosted", "--provider", "example-hosted")
+
+    assert result.exit_code == 2
+    assert "External execution was not enabled" in result.output
+    assert not (tmp_path / "target" / "re-embed-record.json").exists()
+
+
+def test_the_blocking_warning_is_shown_before_the_refusal(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--hosting-mode", "hosted", "--provider", "example-hosted")
+
+    assert "hosted execution is blocked until explicitly enabled" in result.output
+
+
+def test_an_allowed_hosted_run_from_the_cli_says_no_provider_ships(source: Path, tmp_path: Path) -> None:
+    # The CLI cannot supply a hosted embedder, so this is where an operator
+    # learns the boundary rather than getting a silent local run.
+    result = _egress_run(
+        source,
+        tmp_path / "target",
+        "--hosting-mode",
+        "hosted",
+        "--provider",
+        "example-hosted",
+        "--endpoint",
+        "https://embeddings.example/v1",
+        "--data-classification",
+        "public",
+        "--allow-external",
+        "--allow-hosted",
+    )
+
+    assert result.exit_code == 2
+    assert "needs an injected embedder" in result.output
+
+
+def test_a_local_run_naming_a_provider_exits_two(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--provider", "example-hosted")
+
+    assert result.exit_code == 2
+    assert "local_builtin executor cannot declare" in result.output
+
+
+def test_an_unknown_classification_exits_two(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--data-classification", "top-secret")
+
+    assert result.exit_code == 2
+
+
+def test_local_builtin_cannot_claim_provider_telemetry(source: Path, tmp_path: Path) -> None:
+    result = _egress_run(source, tmp_path / "target", "--telemetry-enabled")
+
+    assert result.exit_code == 2
+    assert "cannot claim external consent or provider telemetry" in result.output
+
+
+# --- 3b-5B: CLI diagnostics leak nothing sensitive -------------------------
+
+
+def test_a_refused_external_run_does_not_echo_the_declared_endpoint(source: Path, tmp_path: Path) -> None:
+    # An endpoint can carry a routing hint an operator does not want in logs.
+    # The refusal is about consent, so it does not need to repeat the URL.
+    result = runner.invoke(
+        app,
+        _arguments(source, tmp_path / "target")
+        + [
+            "--provider",
+            "example-hosted",
+            "--endpoint",
+            "https://embeddings.example/v1/secret-tenant-path",
+            "--hosting-mode",
+            "hosted",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "secret-tenant-path" not in result.output
+
+
+def test_cli_output_never_contains_source_text(tmp_path: Path) -> None:
+    source = build_source_store(tmp_path / "evidence", texts={"kept": "cardholder 4111111111111111 secret"}, dimensions=8)
+
+    result = runner.invoke(app, _arguments(source, tmp_path / "target"))
+
+    assert result.exit_code == 0, result.output
+    assert "cardholder" not in result.output
+    assert "4111111111111111" not in result.output
+
+
+def test_an_invalid_endpoint_is_refused_without_echoing_it(source: Path, tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        _arguments(source, tmp_path / "target")
+        + [
+            "--provider",
+            "example-hosted",
+            "--endpoint",
+            "https://user:tenant-password@embeddings.example/v1",
+            "--hosting-mode",
+            "hosted",
+            "--allow-external",
+            "--allow-hosted",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "tenant-password" not in result.output

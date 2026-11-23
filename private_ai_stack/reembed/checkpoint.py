@@ -57,6 +57,7 @@ class Checkpoint:
     target_store_id: str
     target_model: ModelIdentity
     batch_size: int
+    execution_fingerprint: str | None = None
     batches: tuple[CompletedBatch, ...] = ()
 
     @property
@@ -74,11 +75,12 @@ class Checkpoint:
             target_store_id=self.target_store_id,
             target_model=self.target_model,
             batch_size=self.batch_size,
+            execution_fingerprint=self.execution_fingerprint,
             batches=(*self.batches, batch),
         )
 
     def to_document(self) -> dict[str, Any]:
-        return {
+        document: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "source_store_id": self.source_store_id,
             "source_evidence_sha256": self.source_evidence_sha256,
@@ -99,6 +101,9 @@ class Checkpoint:
                 for batch in self.batches
             ],
         }
+        if self.execution_fingerprint is not None:
+            document["execution_fingerprint"] = self.execution_fingerprint
+        return document
 
 
 def write_bytes_atomically(path: Path, payload: bytes) -> str:
@@ -187,12 +192,20 @@ def load_checkpoint(path: Path) -> Checkpoint:
     for key in ("source_store_id", "source_evidence_sha256", "target_store_id"):
         if not isinstance(document.get(key), str) or not document.get(key):
             raise CheckpointError(f"Checkpoint has no {key}.")
+    execution_fingerprint = document.get("execution_fingerprint")
+    if execution_fingerprint is not None and (
+        not isinstance(execution_fingerprint, str)
+        or len(execution_fingerprint) != 64
+        or any(char not in "0123456789abcdef" for char in execution_fingerprint)
+    ):
+        raise CheckpointError("Checkpoint has no valid execution_fingerprint.")
     return Checkpoint(
         source_store_id=str(document["source_store_id"]),
         source_evidence_sha256=str(document["source_evidence_sha256"]),
         target_store_id=str(document["target_store_id"]),
         target_model=identity,
         batch_size=batch_size,
+        execution_fingerprint=execution_fingerprint,
         batches=batches,
     )
 
@@ -205,6 +218,8 @@ def verify_resumable(
     target_store_id: str,
     target_model: ModelIdentity,
     batch_size: int,
+    execution_fingerprint: str,
+    require_execution_binding: bool,
     expected_batches: list[tuple[str, ...]],
     directory: Path,
 ) -> None:
@@ -230,6 +245,11 @@ def verify_resumable(
         raise CheckpointError(f"Checkpoint is for model {checkpoint.target_model.triple}, not {target_model.triple}.")
     if checkpoint.batch_size != batch_size:
         raise CheckpointError(f"Checkpoint used batch size {checkpoint.batch_size}, not {batch_size}.")
+    if checkpoint.execution_fingerprint is None:
+        if require_execution_binding:
+            raise CheckpointError("An external execution cannot resume from a checkpoint without an execution binding.")
+    elif checkpoint.execution_fingerprint != execution_fingerprint:
+        raise CheckpointError("Checkpoint was written for a different executor or consent context.")
     if len(checkpoint.batches) > len(expected_batches):
         raise CheckpointError(f"Checkpoint claims {len(checkpoint.batches)} batches, but this run has {len(expected_batches)}.")
     for batch in checkpoint.batches:

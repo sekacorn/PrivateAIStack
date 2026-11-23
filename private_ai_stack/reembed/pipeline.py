@@ -13,12 +13,16 @@ three things into a target directory:
     A ``re-embed-record.v1`` saying what was rebuilt, what was skipped and why,
     how the run was batched, and what left the machine.
 
-Nothing here opens a socket or loads weights. The target is one of the two
-built-in hashing schemes, which are pure arithmetic over :mod:`hashlib`, so the
-run is reproducible by anyone holding the same source text. Remote providers
-arrive in 3b-5 behind an explicit opt-in, and the ``egress`` block is written
-now so that a later remote run has nowhere to hide: a reader who sees the
-block cannot mistake its absence for a local run.
+By default the target is one of the two registry-owned hashing schemes: pure
+arithmetic over :mod:`hashlib`, reproducible by anyone holding the same source
+text. That is a statement about this implementation, not OS-level network
+isolation.
+
+Any injected embedder is ``external_unverified``. It needs validated consent
+before the source document is opened. Its network behaviour is operator-
+attested because arbitrary Python code can ignore a declared endpoint. The
+``egress`` block records distinct payloads the pipeline submitted; it does not
+turn those attestations into proof of network isolation or provenance.
 
 The record this writes carries no ``quality`` block. A comparison has not been
 run, and ``not_measured`` is a claim about a measurement that was attempted and
@@ -55,6 +59,7 @@ from private_ai_stack.reembed.evidence import (
     SourceStore,
     load_source_store,
 )
+from private_ai_stack.reembed.privacy import EgressError, EgressPreflight, local_egress
 
 DEFAULT_BATCH_SIZE: Final = 64
 """Bounded for a 16 GB machine, and bounded regardless of store size.
@@ -234,6 +239,7 @@ def re_embed_store(
     weights_sha256: str | None = None,
     license_name: str | None = None,
     embedder: Embedder | None = None,
+    egress: EgressPreflight | None = None,
 ) -> ReEmbedOutcome:
     """Rebuild one store with ``target_model``, resuming an interrupted run if one is there.
 
@@ -241,12 +247,34 @@ def re_embed_store(
     that no offline check can confirm, and defaulting it would put a claim into
     the evidence that nobody made.
 
-    ``embedder`` exists so tests can supply a deliberately broken one; left
-    unset, the built-in registry builds the embedder from ``target_model`` and
-    an identity it does not implement is refused rather than approximated.
+    ``embedder`` is an external executor whenever supplied, even if its class
+    resembles a built-in. Left unset, the package registry builds the embedder
+    from ``target_model`` and refuses identities it does not implement.
+
+    ``egress`` defaults to ``local_builtin``. An injected executor requires an
+    explicit ``external_unverified`` preflight. Refusals happen before the
+    evidence document is opened, so source text cannot cross the boundary
+    before consent is validated.
     """
     if not 1 <= batch_size <= MAX_BATCH_SIZE:
         raise ReEmbedError(f"batch_size must be between 1 and {MAX_BATCH_SIZE}, not {batch_size}.")
+    gate = egress if egress is not None else local_egress()
+    # These checks stay before load_source_store: even metadata and source-file
+    # paths remain unread until the external trust boundary is authorized.
+    if gate.blocked:
+        raise ReEmbedError(
+            f"External execution was not enabled for this preflight, so the run is refused before anything is read. "
+            f"Warnings: {'; '.join(gate.warnings)}."
+        )
+    if gate.is_external and embedder is None:
+        raise ReEmbedError(
+            "An external_unverified preflight needs an injected embedder; falling back to the built-in registry "
+            "would make the evidence describe an execution that did not occur."
+        )
+    if not gate.is_external and embedder is not None:
+        raise ReEmbedError(
+            "An injected embedder is external_unverified and requires explicit external consent before source files are read."
+        )
     try:
         store = load_source_store(Path(source_document), source_store_id)
     except EvidenceError as exc:
@@ -255,8 +283,12 @@ def re_embed_store(
         engine = embedder if embedder is not None else build_built_in_embedder(target_model)
     except EmbedderError as exc:
         raise ReEmbedError(str(exc)) from None
-    if engine.identity.triple != target_model.triple:
-        raise ReEmbedError(f"Embedder identity {engine.identity.triple} does not match the declared target {target_model.triple}.")
+    try:
+        engine_identity = engine.identity
+    except Exception:
+        raise ReEmbedError("The embedder identity could not be read safely.") from None
+    if engine_identity.triple != target_model.triple:
+        raise ReEmbedError(f"Embedder identity {engine_identity.triple} does not match the declared target {target_model.triple}.")
     directory = Path(target_directory)
     directory.mkdir(parents=True, exist_ok=True)
     retained = store.retained
@@ -271,6 +303,7 @@ def re_embed_store(
         target_store_id=target_store_id,
         target_model=target_model,
         batch_size=batch_size,
+        execution_fingerprint=gate.execution_fingerprint,
     )
     resumed = False
     if checkpoint_path.exists():
@@ -283,6 +316,8 @@ def re_embed_store(
                 target_store_id=target_store_id,
                 target_model=target_model,
                 batch_size=batch_size,
+                execution_fingerprint=gate.execution_fingerprint,
+                require_execution_binding=gate.is_external,
                 expected_batches=plan,
                 directory=directory,
             )
@@ -308,7 +343,11 @@ def re_embed_store(
             except EvidenceError as exc:
                 raise ReEmbedError(str(exc)) from None
             _, source_digest = sources.setdefault(record_id, _ensure_source_copy(directory, positions[record_id], text))
-            values = engine.embed(text)
+            try:
+                values = engine.embed(text)
+            except Exception:
+                label = "external executor" if gate.is_external else "built-in embedder"
+                raise ReEmbedError(f"The {label} failed while processing a source record.") from None
             if len(values) != target_model.dimensions:
                 raise ReEmbedError(
                     f"Embedder produced {len(values)} dimensions for {record_id!r}, but the declared model is "
@@ -348,6 +387,15 @@ def re_embed_store(
 
     missing = store.count(MISSING)
     deleted = store.count(DELETED_BY_POLICY)
+    # Completed checkpoint batches are the durable set of distinct payloads
+    # submitted to this execution context. Binding the checkpoint to the gate
+    # prevents a resume from switching executor or provider and then claiming
+    # every prior record was submitted to the new one.
+    try:
+        submitted = len(checkpoint.completed_record_ids) if gate.is_external else 0
+        egress_block = gate.to_document(records_submitted=submitted)
+    except EgressError as exc:
+        raise ReEmbedError(str(exc)) from None
     record_path = directory / RECORD_FILENAME
     write_json_atomically(
         record_path,
@@ -370,7 +418,7 @@ def re_embed_store(
                 "deleted_by_policy_skipped": deleted,
                 "failed": 0,
             },
-            "egress": {"remote_provider_used": False, "records_transmitted": 0, "raw_source_text_transmitted": False},
+            "egress": egress_block,
         },
     )
     return ReEmbedOutcome(

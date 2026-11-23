@@ -42,6 +42,7 @@ from typing import Any, Final
 from private_ai_stack.reembed.checkpoint import write_json_atomically
 from private_ai_stack.reembed.embedders import Embedder, ModelIdentity, build_built_in_embedder
 from private_ai_stack.reembed.evidence import SourceRecord, SourceStore, load_source_store
+from private_ai_stack.reembed.privacy import EgressError, EgressPreflight, local_egress
 
 SCHEMA_VERSION: Final = "re-embed-estimate.v1"
 ESTIMATE_FILENAME: Final = "re-embed-estimate.json"
@@ -104,6 +105,7 @@ class ReEmbedEstimate:
     deleted_by_policy_skipped: int
     calibration: Calibration | None
     cost: dict[str, Any]
+    egress: dict[str, Any]
     limits: tuple[str, ...]
 
     @property
@@ -148,11 +150,7 @@ class ReEmbedEstimate:
             "calibration": None if self.calibration is None else self.calibration.to_document(),
             "projection": projection,
             "cost": self.cost,
-            "egress": {
-                "remote_provider_used": False,
-                "records_transmitted": 0,
-                "raw_source_text_transmitted": False,
-            },
+            "egress": self.egress,
             "limits": list(self.limits),
         }
 
@@ -327,6 +325,7 @@ def estimate_re_embed(
     sample_seed: str = DEFAULT_SAMPLE_SEED,
     cost_profile: dict[str, Any] | None = None,
     embedder: Embedder | None = None,
+    egress: EgressPreflight | None = None,
     output: Path | None = None,
 ) -> ReEmbedEstimate:
     """Measure a calibration sample and extrapolate it to the whole store.
@@ -340,14 +339,28 @@ def estimate_re_embed(
         raise EstimateError(f"Calibration sample size must be between 0 and {MAX_SAMPLE_SIZE}.")
     if not sample_seed:
         raise EstimateError("A calibration sample seed is required, so the selection can be repeated.")
+    gate = egress if egress is not None else local_egress()
+    if gate.blocked:
+        raise EstimateError("External execution was not enabled, so the estimate is refused before anything is read.")
+    if gate.is_external and embedder is None:
+        raise EstimateError("An external_unverified preflight needs an injected embedder.")
+    if not gate.is_external and embedder is not None:
+        raise EstimateError(
+            "An injected embedder is external_unverified and requires explicit external consent before source files are read."
+        )
     store = load_source_store(source_document, store_id=source_store_id)
     worker = embedder if embedder is not None else build_built_in_embedder(target_model)
-    if worker.identity.triple != target_model.triple:
-        raise EstimateError(f"Embedder identity {worker.identity.triple} does not match the declared {target_model.triple}.")
+    try:
+        worker_identity = worker.identity
+    except Exception:
+        raise EstimateError("The embedder identity could not be read safely.") from None
+    if worker_identity.triple != target_model.triple:
+        raise EstimateError(f"Embedder identity {worker_identity.triple} does not match the declared {target_model.triple}.")
 
     records_to_embed = len(store.retained)
     effective = min(sample_size, records_to_embed)
     calibration: Calibration | None = None
+    submitted = 0
     if effective > 0:
         tokens = 0
         source_bytes = 0
@@ -357,14 +370,20 @@ def estimate_re_embed(
             text = store.read_text(record)
             source_bytes += len(text.encode("utf-8"))
             started = time.perf_counter_ns()
-            vector = worker.embed(text)
+            try:
+                vector = worker.embed(text)
+                counted, tokenizer = _count_tokens(worker, text)
+            except Exception:
+                label = "external executor" if gate.is_external else "built-in embedder"
+                raise EstimateError(f"The {label} failed while processing a calibration record.") from None
+            if gate.is_external:
+                submitted += 1
             elapsed_ns += time.perf_counter_ns() - started
             if len(vector) != target_model.dimensions:
                 raise EstimateError(
                     f"Embedder produced {len(vector)} dimensions for {record.record_id!r}, "
                     f"but the declared model is {target_model.dimensions}."
                 )
-            counted, tokenizer = _count_tokens(worker, text)
             tokens += counted
         calibration = Calibration(
             sample_size=effective,
@@ -376,6 +395,10 @@ def estimate_re_embed(
         )
 
     cost = _local_cost(calibration, records_to_embed, cost_profile)
+    try:
+        egress_document = gate.to_document(records_submitted=submitted)
+    except EgressError as exc:
+        raise EstimateError(str(exc)) from None
     estimate = ReEmbedEstimate(
         source_store_id=store.store_id,
         source_evidence_sha256=store.document_sha256,
@@ -385,6 +408,7 @@ def estimate_re_embed(
         deleted_by_policy_skipped=store.count("deleted_by_policy"),
         calibration=calibration,
         cost=cost,
+        egress=egress_document,
         limits=_limits(calibration, records_to_embed, cost),
     )
     if output is not None:

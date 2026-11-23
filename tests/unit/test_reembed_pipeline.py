@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import socket
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +27,7 @@ from private_ai_stack.reembed.pipeline import (
     ReEmbedOutcome,
     re_embed_store,
 )
+from private_ai_stack.reembed.privacy import EXTERNAL_UNVERIFIED, provider_data_preflight
 
 TARGET = ModelIdentity(id=PRIVATEAISTACK_HASHED_BOW, revision="1", dimensions=16)
 STORE_ONLY = ("checkpoint.json", "re-embed-record.json")
@@ -48,6 +47,13 @@ def run(
     availability: str = "open_weight_self_hostable",
     **extra: Any,
 ) -> ReEmbedOutcome:
+    if embedder is not None and "egress" not in extra:
+        extra["egress"] = provider_data_preflight(
+            executor_kind=EXTERNAL_UNVERIFIED,
+            provider="test-local-executor",
+            endpoint="http://127.0.0.1:11434/embed",
+            allow_external=True,
+        )
     return re_embed_store(
         source_document=source,
         source_store_id="support-memory",
@@ -209,7 +215,21 @@ def test_the_record_accounts_for_the_run(tmp_path: Path) -> None:
         "resumed": False,
         "checkpoint_sha256": hashlib.sha256(outcome.checkpoint.read_bytes()).hexdigest(),
     }
-    assert record["egress"] == {"remote_provider_used": False, "records_transmitted": 0, "raw_source_text_transmitted": False}
+    assert record["egress"] == {
+        "executor_kind": "local_builtin",
+        "execution_verification": "registry_owned",
+        "remote_provider_used": False,
+        "records_transmitted": 0,
+        "transmission_basis": "no_transmission",
+        "records_submitted_to_external_executor": 0,
+        "raw_source_text_transmitted": False,
+        "hosting_mode": "local",
+        "external_execution_confirmed": False,
+        "hosted_execution_confirmed": False,
+        "dataset_privacy_classification": "unknown",
+        "redaction_applied": False,
+        "telemetry_enabled": False,
+    }
 
 
 def test_the_record_makes_no_quality_claim_because_nothing_was_compared(tmp_path: Path) -> None:
@@ -288,7 +308,7 @@ def test_an_interrupted_run_finishes_to_the_same_bytes_as_an_uninterrupted_one(t
         run(source, target, batch_size=2, embedder=CountingEmbedder(limit))
     assert (target / CHECKPOINT_FILENAME).exists() or limit < 2
 
-    outcome = run(source, target, batch_size=2)
+    outcome = run(source, target, batch_size=2, embedder=CountingEmbedder(100))
     assert tree_digest(target, skip=STORE_ONLY) == expected
     assert outcome.retained_rebuilt == 7
     assert outcome.resumed is (limit >= 2)
@@ -309,7 +329,7 @@ def test_every_retained_record_appears_exactly_once_after_an_interruption(tmp_pa
     target = tmp_path / "target"
     with pytest.raises(KeyboardInterrupt):
         run(source, target, batch_size=4, embedder=CountingEmbedder(5))
-    run(source, target, batch_size=4)
+    run(source, target, batch_size=4, embedder=CountingEmbedder(100))
     written = [
         json.loads(line)["record_id"]
         for path in sorted((target / "vectors").iterdir())
@@ -394,7 +414,7 @@ def test_editing_the_input_after_a_partial_run_is_refused(tmp_path: Path) -> Non
         run(source, target, batch_size=2, embedder=CountingEmbedder(2))
     build_source_store(source_dir, texts=many_texts(8))
     with pytest.raises(ReEmbedError, match="different input document"):
-        run(source, target, batch_size=2)
+        run(source, target, batch_size=2, embedder=CountingEmbedder(100))
 
 
 def test_a_checkpoint_claiming_a_shard_that_is_not_there_is_refused(tmp_path: Path) -> None:
@@ -525,19 +545,17 @@ def test_an_absent_source_store_is_reported_not_rebuilt(tmp_path: Path) -> None:
         run(source, tmp_path / "target")
 
 
-# --- offline ------------------------------------------------------------------------
+# --- default execution ---------------------------------------------------------------
 
 
-def test_a_run_opens_no_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """3b-2 is local only. A remote provider arrives in 3b-5, behind an opt-in."""
-
-    def refuse(*args: Any, **kwargs: Any) -> Iterator[None]:
-        raise AssertionError("the offline pipeline opened a socket")
-
-    monkeypatch.setattr(socket, "socket", refuse)
-    monkeypatch.setattr(socket, "create_connection", refuse)
+def test_a_default_run_records_registry_ownership_without_an_isolation_claim(tmp_path: Path) -> None:
     source = build_source_store(tmp_path / "source", texts=many_texts(5))
-    assert run(source, tmp_path / "target", batch_size=2).retained_rebuilt == 5
+    outcome = run(source, tmp_path / "target", batch_size=2)
+    egress = read_json(outcome.record)["egress"]
+    assert outcome.retained_rebuilt == 5
+    assert egress["executor_kind"] == "local_builtin"
+    assert egress["execution_verification"] == "registry_owned"
+    assert "network_behavior_verification" not in egress
 
 
 def test_the_default_batch_size_is_bounded_for_a_small_machine() -> None:

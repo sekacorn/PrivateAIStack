@@ -34,6 +34,11 @@
       }
     },
     "batch_size": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "execution_fingerprint": {
+      "description": "SHA-256 binding resumable work to the executor trust kind, endpoint origin, provider, classification and consent context. Older local_builtin checkpoints may omit it; external_unverified resumes require it.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "batches": {
       "description": "Completed batches in order, each claiming exactly one shard. Any shard file on disk that no entry claims is an unfinished batch from an interrupted run and is discarded rather than trusted.",
       "type": "array",
