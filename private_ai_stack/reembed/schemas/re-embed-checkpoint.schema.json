@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sekacorn/PrivateAIStack/schemas/re-embed-checkpoint.schema.json",
+  "title": "re-embed-checkpoint.v1",
+  "description": "The resume state of a re-embedding run. It is written and flushed after each batch's shard reaches disk, so a batch counts as done only once the vectors it produced are durable. It binds itself to the exact input document, the exact target store and the exact model triple: a checkpoint that does not match what it is resumed against is an error, never a partial resume. It is not evidence about a store and is never read by exit-report; the re-embed record is what a reader consumes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_store_id",
+    "source_evidence_sha256",
+    "target_store_id",
+    "target_model",
+    "batch_size",
+    "batches"
+  ],
+  "properties": {
+    "schema_version": { "const": "re-embed-checkpoint.v1" },
+    "source_store_id": { "$ref": "#/$defs/identifier" },
+    "source_evidence_sha256": {
+      "description": "SHA-256 of the input embedding-portability.v1 document bytes. A mismatch on resume is a hard error: the input is not the one this run started against.",
+      "$ref": "#/$defs/sha256"
+    },
+    "target_store_id": { "$ref": "#/$defs/identifier" },
+    "target_model": {
+      "description": "The identity triple the vectors were produced under. Dimensions are part of identity because the bucket a token lands in depends on them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "revision", "dimensions"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "dimensions": { "type": "integer", "minimum": 1, "maximum": 8192 }
+      }
+    },
+    "batch_size": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "batches": {
+      "description": "Completed batches in order, each claiming exactly one shard. Any shard file on disk that no entry claims is an unfinished batch from an interrupted run and is discarded rather than trusted.",
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "shard_path", "shard_sha256", "record_ids"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "shard_path": { "$ref": "#/$defs/relative_path" },
+          "shard_sha256": {
+            "description": "SHA-256 of the shard file as written. Checked on resume; a mismatch is a hard error rather than a reason to re-embed, because something other than this run changed the file.",
+            "$ref": "#/$defs/sha256"
+          },
+          "record_ids": {
+            "description": "The records this batch covered, in the order written. Resume skips by identifier, not by count, so a reordered input cannot cause a silent skip.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10000,
+            "items": { "$ref": "#/$defs/identifier" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(/[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*$"
+    }
+  }
+}
