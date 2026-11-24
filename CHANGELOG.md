@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Re-embedding
+
+No published version contains the `reembed` command group: every item here is
+new to anyone upgrading from `0.2.0b1`. The note below is written as a change
+because it *is* one relative to the development branch, where `--anchor-seed`
+previously produced a score-moving result.
+
+- **`privateaistack reembed quality --anchor-seed` marks the anchor set
+  operator-chosen and never moves a lock-in score.** The seed is derived as
+  `sha256` over the source and target store digests; supplying `--anchor-seed`
+  overrides that derivation. An overridden seed sets `anchor_selection:
+  operator`: the comparison still runs, and its label, metrics and threshold
+  checks are all reported in full, but the result can never move a store from
+  50 to 25, and no seed is written into the re-embed record.
+
+  The anchors drawn are identical either way. Only the provenance differs, and
+  the provenance is the point: an operator who can choose the seed can draw
+  query set after query set until the numbers clear the declared threshold and
+  then publish the one that passed. A derived seed is a function of content the
+  record already commits to, so nobody can steer it and a third party can
+  recompute the same set from the record alone.
+
+  Omit the flag to get a derived seed and a `seeded_random` set. The AI
+  Infrastructure Suite derives the same value independently and reads any other
+  seed as operator-chosen, so the two must agree; a cross-repo test asserts
+  that they do.
+
 ### Dependencies
 
 - **Raised the minimum Forge version to `agentforge-oss>=0.5.5,<0.6.0`**, for
