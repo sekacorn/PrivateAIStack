@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import socket
@@ -43,6 +44,7 @@ from private_ai_stack.reembed import (
     ReEmbedError,
     attach_quality,
     compare_stores,
+    derive_anchor_seed,
     draw_anchors,
     estimate_re_embed,
     load_cost_profile,
@@ -770,7 +772,15 @@ def reembed_quality(
         int,
         typer.Option("--anchors", help="How many anchors to draw by seed when no query set is supplied."),
     ] = DEFAULT_ANCHOR_COUNT,
-    anchor_seed: Annotated[str, typer.Option("--anchor-seed", help="Seed for the draw, recorded in the result.")] = DEFAULT_SEED,
+    anchor_seed: Annotated[
+        str | None,
+        typer.Option(
+            "--anchor-seed",
+            help=(
+                "Override the derived seed. Doing so marks the query set operator-chosen, so it reports in full and moves no lock-in score."
+            ),
+        ),
+    ] = None,
     top_k: Annotated[int, typer.Option("--top-k", help="How many neighbours each ranking keeps.")] = DEFAULT_TOP_K,
     candidate_pool: Annotated[
         int, typer.Option("--candidate-pool", help="How many records each query is ranked against.")
@@ -812,14 +822,26 @@ def reembed_quality(
         if query_set is not None:
             queries = load_query_set(query_set.expanduser().resolve())
         else:
-            queries = draw_anchors(before.record_ids, count=anchors, seed=anchor_seed)
+            # Derived from both store digests, so nobody can grind it. Passing
+            # --anchor-seed is a choice, and a chosen seed is reported as a
+            # chosen query set rather than as a draw.
+            derived = derive_anchor_seed(
+                hashlib.sha256(before_document.expanduser().resolve().read_bytes()).hexdigest(),
+                hashlib.sha256(after_document.expanduser().resolve().read_bytes()).hexdigest(),
+            )
+            queries = draw_anchors(
+                before.record_ids,
+                count=anchors,
+                seed=anchor_seed or derived,
+                derived=anchor_seed is None,
+            )
         result = compare_stores(
             before=before,
             after=after,
             query_set=queries,
             thresholds=thresholds,
             candidate_pool=candidate_pool,
-            seed=anchor_seed,
+            seed=queries.seed or DEFAULT_SEED,
         )
         document = result.to_document()
         document["measures_user_search_quality"] = result.measures_user_search_quality

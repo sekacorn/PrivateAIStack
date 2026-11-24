@@ -22,6 +22,7 @@ from private_ai_stack.reembed import (
     QuerySet,
     attach_quality,
     compare_stores,
+    derive_anchor_seed,
     draw_anchors,
     load_query_set,
     load_vector_store,
@@ -900,3 +901,61 @@ def test_the_quality_block_names_every_field_the_result_carries(stores: tuple[An
         "thresholds",
         "notes",
     }
+
+
+# --- 3b-6: seeds are derived, never accepted ------------------------------
+
+
+def test_the_anchor_seed_is_derived_from_both_store_digests() -> None:
+    first = derive_anchor_seed("a" * 64, "b" * 64)
+
+    assert first == derive_anchor_seed("a" * 64, "b" * 64)
+    assert len(first) == 64
+    # Not symmetric: source and target are not interchangeable.
+    assert first != derive_anchor_seed("b" * 64, "a" * 64)
+    assert first != derive_anchor_seed("a" * 64, "c" * 64)
+
+
+def test_a_derived_seed_draw_reports_as_seeded_random(stores: tuple[Any, Any, Path]) -> None:
+    before, _, _ = stores
+
+    drawn = draw_anchors(before.record_ids, count=4, seed=derive_anchor_seed("a" * 64, "b" * 64))
+
+    assert drawn.selection == SEEDED_RANDOM
+    assert drawn.seed is not None
+
+
+def test_a_chosen_seed_reports_as_operator_even_though_the_draw_is_mechanical(
+    stores: tuple[Any, Any, Path],
+) -> None:
+    # An operator who can pick the seed can keep picking until the numbers
+    # pass, so the provenance of the seed decides how the set is labelled.
+    before, _, _ = stores
+
+    drawn = draw_anchors(before.record_ids, count=4, seed="operator-picked", derived=False)
+
+    assert drawn.selection == OPERATOR
+    assert drawn.seed is None
+
+
+def test_a_chosen_seed_still_draws_the_same_anchors(stores: tuple[Any, Any, Path]) -> None:
+    # Only the label changes, not the arithmetic: the result is still
+    # reproducible, it just cannot be trusted to be unchosen.
+    before, _, _ = stores
+
+    derived = draw_anchors(before.record_ids, count=4, seed="same-seed", derived=True)
+    chosen = draw_anchors(before.record_ids, count=4, seed="same-seed", derived=False)
+
+    assert derived.anchors == chosen.anchors
+    assert derived.selection != chosen.selection
+
+
+def test_a_chosen_seed_records_no_seed_in_the_result(stores: tuple[Any, Any, Path]) -> None:
+    before, after, _ = stores
+    chosen = draw_anchors(before.record_ids, count=24, seed="operator-picked", derived=False)
+
+    result = compare_stores(before=before, after=after, query_set=chosen, thresholds=_thresholds())
+
+    document = result.to_document()
+    assert document["anchor_selection"] == OPERATOR
+    assert "anchor_seed" not in document

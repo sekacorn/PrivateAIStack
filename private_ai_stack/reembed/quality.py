@@ -110,6 +110,29 @@ calibrated one should not have to calibrate the other.
 DEFAULT_ANCHOR_COUNT: Final = 32
 DEFAULT_CANDIDATE_POOL: Final = 256
 DEFAULT_SEED: Final = "re-embed-quality"
+"""Retained only as the fallback when no store digests are available.
+
+A seed an operator can choose is a seed an operator can grind: draw query set
+after query set until the numbers clear the bar, then publish the one that
+passed. :func:`derive_anchor_seed` is what a real run uses, and the AI
+Infrastructure Suite treats any other seed as an operator-chosen query set --
+reported in full, moving no lock-in score.
+"""
+
+
+def derive_anchor_seed(source_store_sha256: str, target_store_sha256: str) -> str:
+    """The only anchor seed a record may carry and still move a score.
+
+    A function of the two store digests the record already commits to, so
+    neither the operator nor this tool can steer it, and a third party
+    recomputes the same query set from the record alone. The suite derives the
+    same value independently; if these two ever disagree, every record this
+    tool writes silently stops being able to move a score, which is why the
+    formula is pinned by a test on both sides.
+    """
+    payload = f"re-embed-anchor:{source_store_sha256}:{target_store_sha256}"
+    return hashlib.sha256(payload.encode()).hexdigest()
+
 
 MAX_TOP_K: Final = 1000
 MAX_ANCHORS: Final = 1000
@@ -487,19 +510,31 @@ def load_query_set(path: Path) -> QuerySet:
     raise QualityError(f"Unknown query set mode: {mode!r}")
 
 
-def draw_anchors(record_ids: tuple[str, ...], *, count: int, seed: str) -> QuerySet:
+def draw_anchors(record_ids: tuple[str, ...], *, count: int, seed: str, derived: bool = True) -> QuerySet:
     """Draw a reproducible anchor set by seeded hash over the record identifiers.
 
     The same ordering the cost estimate uses, for the same reason: taking the
     first N identifiers would be a sample of whatever the identifiers happen to
     correlate with, and nothing says they are unrelated to record size or age.
+
+    ``derived`` says where the seed came from, and it is the whole difference
+    between a draw and a choice. A seed from :func:`derive_anchor_seed` is a
+    function of content the record commits to, so nobody could have ground it,
+    and the set is reported as ``seeded_random``. A seed somebody picked is
+    reported as ``operator`` even though the draw itself is mechanical, because
+    an operator who can pick the seed can keep picking until the numbers pass.
     """
     if not 0 <= count <= MAX_ANCHORS:
         raise QualityError(f"The anchor count must be between 0 and {MAX_ANCHORS}, not {count}.")
     if not seed or len(seed) > 128:
         raise QualityError("The anchor seed must be 1 to 128 characters.")
     ordered = sorted(record_ids, key=lambda record_id: hashlib.sha256(f"{seed}:{record_id}".encode()).hexdigest())
-    return QuerySet(mode=RECORD_ANCHORED, selection=SEEDED_RANDOM, seed=seed, anchors=tuple(ordered[:count]))
+    return QuerySet(
+        mode=RECORD_ANCHORED,
+        selection=SEEDED_RANDOM if derived else OPERATOR,
+        seed=seed if derived else None,
+        anchors=tuple(ordered[:count]),
+    )
 
 
 def _draw_pool(record_ids: tuple[str, ...], *, size: int, seed: str, keep: set[str]) -> tuple[str, ...]:
