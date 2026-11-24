@@ -29,6 +29,16 @@ previously produced a score-moving result.
   seed as operator-chosen, so the two must agree; a cross-repo test asserts
   that they do.
 
+### Dependencies
+
+- **Raised the minimum Forge version to `agentforge-oss>=0.5.5,<0.6.0`**, for
+  the core install and every extra that names it. 0.5.5 is a security release:
+  in 0.5.4 and earlier, provider errors could repeat upstream text, including
+  an API key reflected by a proxy or third-party endpoint, and a `base_url`
+  containing credentials was logged. The previous floor, `0.5.1`, was also
+  lower than anything CI verified: the `embedder-conformance` job always
+  tests the latest release in the range.
+
 ## 0.2.0b1 - 2026-08-12
 
 ### First Beta candidate

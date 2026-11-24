@@ -115,7 +115,7 @@ Agents own:
 The supported Forge package range is:
 
 ```text
-agentforge-oss>=0.5.1,<0.6.0
+agentforge-oss>=0.5.5,<0.6.0
 ```
 
 Verified import:
