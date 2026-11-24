@@ -2,7 +2,7 @@
 
 PrivateAIStack is a local-first, provider-replaceable AI stack for governed agent tasks, explicit RAG persistence, private code review, auditability, and optional open observability.
 
-Status: `0.2.0b1` Beta candidate architecture.
+Status: `0.2.0b2` Beta candidate architecture.
 
 Author: sekacorn
 
