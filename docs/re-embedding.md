@@ -411,9 +411,21 @@ The job also asserts that an injected unknown field *is* refused by both, so a
 pass means the check still has teeth rather than that it has quietly stopped
 looking.
 
+`suite-contract` is a **required** status check on `master`, and it also runs
+on a nightly schedule. The suite is a separate repository on its own cadence,
+so a change there can break this contract without anything happening here; the
+nightly run surfaces that within a day rather than whenever somebody next opens
+a pull request.
+
+Because it is required, a missing suite is a **failure** in that job, not a
+skip: `PRIVATEAISTACK_REQUIRE_SUITE_CONTRACT=1` turns the import into a hard
+error. A botched install would otherwise skip every test and report the
+required check as passing, which is the one outcome a contract gate must never
+produce.
+
 The suite is not a declared dependency of this package — that would invert the
-layering — so `tests/contract` skips when it is absent and the offline matrix
-stays offline. Run it locally with:
+layering — so without that variable `tests/contract` skips when it is absent
+and the offline matrix stays offline. Run it locally with:
 
 ```
 pip install -e ".[dev]" jsonschema
