@@ -150,7 +150,7 @@ privateaistack reembed quality ./evidence/embedding-portability.json ./rebuilt/e
 | `--before-store`, `--after-store` | Which store in each document. |
 | `--query-set` | A `golden-query-set.v1` document. A file is always operator-chosen, so the result reports in full and **can never move a lock-in score**. |
 | `--anchors` | How many anchors to draw by seed when no query set is supplied. Default 32. |
-| `--anchor-seed` | Seed for the draw, recorded in the result. Default `re-embed-quality`. |
+| `--anchor-seed` | **Override** the derived seed. The seed is otherwise `sha256` over the two store digests, so nobody can grind it. Passing one is a choice, so the query set reports as `operator` and moves no lock-in score. |
 | `--top-k` | How many neighbours each ranking keeps. Default 10. |
 | `--candidate-pool` | How many records each query is ranked against. Default 256. A `top_k_overlap` is a share of this pool, not of the whole store. |
 | `--min-sample-size` | Below this many evaluated queries the result is `not_measured`. Default 20. |

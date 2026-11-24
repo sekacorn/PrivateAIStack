@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from private_ai_stack.cli.main import app
+from private_ai_stack.reembed import derive_anchor_seed
 from tests.unit.reembed_support import build_ranked_store, build_source_store
 
 runner = CliRunner()
@@ -264,7 +266,12 @@ def test_the_quality_command_writes_into_the_re_embed_record(ranked: tuple[Path,
     assert result.exit_code == 0, result.output
     document = json.loads(record.read_text(encoding="utf-8"))
     assert document["quality"]["status"] == "sampled"
-    assert document["quality"]["anchor_seed"] == "re-embed-quality"
+    # Derived from both store digests, not a literal anybody could have picked.
+    expected = derive_anchor_seed(
+        hashlib.sha256(before.read_bytes()).hexdigest(),
+        hashlib.sha256(after.read_bytes()).hexdigest(),
+    )
+    assert document["quality"]["anchor_seed"] == expected
 
 
 def test_an_unknown_store_exits_two(ranked: tuple[Path, Path]) -> None:

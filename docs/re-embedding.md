@@ -242,8 +242,25 @@ is the only case where the old model can be re-run offline. With
 
 | `anchor_selection` | Where the set came from | Reports | Can move 50 → 25 |
 |---|---|---|---|
-| `seeded_random` | Drawn by this tool from `--anchor-seed`, which is recorded | In full | Yes, when every other condition holds |
-| `operator` | A `golden-query-set.v1` file you supplied | In full | Never |
+| `seeded_random` | Drawn from the **derived** seed, which is recorded | In full | Yes, when every other condition holds |
+| `operator` | A `golden-query-set.v1` file, or a seed you chose with `--anchor-seed` | In full | Never |
+
+#### The seed is derived, not chosen
+
+An operator who picks the seed can grind it: draw query set after query set
+until the numbers clear the bar, then publish the one that passed. So the seed
+is `sha256` over the source and target store digests — content the record
+already commits to, which nobody can steer and a third party can recompute.
+
+Passing `--anchor-seed` overrides it, and that is treated as a choice: the set
+reports as `operator`, moves no score, and no seed is written into the record.
+The anchors drawn are identical either way; only the provenance differs, and
+provenance is the whole question.
+
+The AI Infrastructure Suite derives the same value independently and reads any
+other seed as an operator-chosen set. A cross-repo test asserts both sides
+compute it identically, because if they ever diverged every record this tool
+writes would silently stop being able to move a score.
 
 A file is always `operator`, whatever it says about itself: the file is what
 you chose to hand over. An operator who may pick the queries may pick the

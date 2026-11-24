@@ -160,3 +160,124 @@ def test_every_emitted_egress_field_is_known_to_the_suite(emitted: dict[str, dic
             unknown[variant] = extra
 
     assert not unknown, f"egress fields the installed suite does not know: {unknown}"
+
+
+# --- 3b-6: the two implementations must not drift -------------------------
+
+AGREEMENT_TEXTS: Final = (
+    "Escalate to the on-call engineer when the queue depth exceeds 40.",
+    "Refunds over 500 need a supervisor approval and an audit entry.",
+    "repeated repeated repeated repeated",
+    "MiXeD CaSe Tokens 123 456",
+    "ünïcödé tëxt wíth áccents",
+    "a",
+    "   ",
+    "!!! ??? ...",
+    "tab\tseparated\twords",
+    "trailing whitespace   ",
+)
+AGREEMENT_DIMENSIONS: Final = (1, 8, 16, 64, 384)
+
+
+def test_the_suite_reimplements_the_same_arithmetic() -> None:
+    """The cross-repo agreement test the 3b-6 design turns on.
+
+    The suite reproduces a rebuild with its *own* copy of these two schemes,
+    because using this package's embedders to verify this package's claims
+    would not be independent verification. The price of a third
+    implementation is drift, and this is where drift surfaces: not in a shared
+    fixture two repositories have to keep in step by hand, but in the two
+    implementations being run against each other.
+
+    If this fails, every record this package writes silently stops being able
+    to move a lock-in score, because the suite's recomputation will not match.
+    """
+    suite_reproduction = _import_or_fail("ai_infrastructure_suite.reproduction", "ai-infrastructure-suite")
+    from private_ai_stack.reembed.embedders import BUILT_IN_MODEL_IDS, ModelIdentity, build_built_in_embedder
+
+    compared = 0
+    for model_id in sorted(BUILT_IN_MODEL_IDS):
+        for dimensions in AGREEMENT_DIMENSIONS:
+            embedder = build_built_in_embedder(ModelIdentity(id=model_id, revision="1", dimensions=dimensions))
+            assert suite_reproduction.is_reproducible(model_id, "1", dimensions), (
+                f"The suite does not recognise {model_id}@1 at {dimensions} dimensions, so it could never reproduce a rebuild onto it."
+            )
+            for text in AGREEMENT_TEXTS:
+                ours = embedder.embed(text)
+                theirs = suite_reproduction.embed(text, model_id=model_id, revision="1", dimensions=dimensions)
+                assert suite_reproduction.vectors_match(theirs, ours), (
+                    f"Drift: {model_id}@1 at {dimensions} dimensions disagrees on {text!r}."
+                )
+                compared += 1
+    assert compared == len(BUILT_IN_MODEL_IDS) * len(AGREEMENT_DIMENSIONS) * len(AGREEMENT_TEXTS)
+
+
+def test_both_sides_derive_the_same_anchor_seed() -> None:
+    """A seed the two sides disagree about is a score that never moves.
+
+    The suite treats any anchor seed other than the one it derives as an
+    operator-chosen query set. If these formulas diverge, every record this
+    package writes is read as hand-picked and moves nothing -- silently, with
+    no error anywhere.
+    """
+    suite_scan = _import_or_fail("ai_infrastructure_suite.re_embed_scan", "ai-infrastructure-suite")
+    from private_ai_stack.reembed import derive_anchor_seed
+
+    for source, target in (("a" * 64, "b" * 64), ("0" * 64, "f" * 64), ("1" * 64, "1" * 64)):
+        assert derive_anchor_seed(source, target) == suite_scan.derive_anchor_seed(source, target)
+    # And it is not accidentally symmetric, which would make source and target
+    # interchangeable.
+    assert derive_anchor_seed("a" * 64, "b" * 64) != derive_anchor_seed("b" * 64, "a" * 64)
+
+
+def test_a_record_this_package_writes_earns_the_verified_level(tmp_path: Path) -> None:
+    """The whole contract, end to end, in the one case that is supposed to work.
+
+    A vendor-locked store rebuilt onto a self-hostable built-in scheme, with a
+    derived anchor seed, must come out of the suite as a reproduced rebuild
+    that moves 50 to 25. Every other test here checks a piece; this checks
+    that the pieces still add up.
+    """
+    suite_scan = _import_or_fail("ai_infrastructure_suite.re_embed_scan", "ai-infrastructure-suite")
+    import hashlib
+
+    from private_ai_stack.reembed import derive_anchor_seed
+    from tests.unit.reembed_record_fixtures import (
+        MODEL,
+        build_hosted_record,  # noqa: F401  (import check)
+        build_local_record,
+    )
+
+    record_path = build_local_record(tmp_path)
+    document = json.loads(record_path.read_text(encoding="utf-8"))
+    source_sha = document["source_store"]["store_evidence_sha256"]
+    target_sha = document["target_store"]["store_evidence_sha256"]
+    document["quality"] = {
+        "status": "sampled",
+        "query_set_size": 24,
+        "top_k": 5,
+        "sufficient_evidence": True,
+        "mode": "record_anchored",
+        "metric_basis": "neighborhood_agreement",
+        "anchor_selection": "seeded_random",
+        "anchor_seed": derive_anchor_seed(source_sha, target_sha),
+        "similarity": "cosine",
+        "thresholds": {"minimum_top_k_overlap": 0.7},
+        "metrics": {"top_k_overlap": 0.81},
+        "checks": [{"name": "minimum_top_k_overlap", "passed": True, "actual": 0.81, "threshold": 0.7}],
+        "notes": "Neighborhood agreement between the two stores.",
+    }
+    record_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+    assessment = suite_scan.scan_re_embed_record(
+        record_path,
+        declared_sha256=hashlib.sha256(record_path.read_bytes()).hexdigest(),
+        source_store_sha256=source_sha,
+        source_store_ids=frozenset({"support-memory"}),
+    )
+
+    assert assessment.reproduced, assessment.reason
+    assert assessment.anchor_selection == "seeded_random"
+    assert not assessment.seed_was_ground
+    assert assessment.label == "verified (re-embedded, quality sampled)"
+    assert MODEL.id.startswith("privateaistack.")
