@@ -19,19 +19,47 @@ express; the schema enforces the field inventory with
 
 from __future__ import annotations
 
+import importlib
 import json
+import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
 from tests.unit.reembed_record_fixtures import VARIANTS, build_all
 
-suite_reader = pytest.importorskip(
-    "ai_infrastructure_suite.re_embed_record",
-    reason="ai-infrastructure-suite is not installed; the contract job installs it from the suite's main branch.",
-)
-jsonschema = pytest.importorskip("jsonschema", reason="jsonschema is not installed; the contract job installs it.")
+REQUIRE_ENV: Final = "PRIVATEAISTACK_REQUIRE_SUITE_CONTRACT"
+"""Set by CI. Turns a missing suite from a skip into a failure.
+
+A skip is the right answer on a developer's offline machine, where the suite is
+not installed and the unit matrix must stay offline. It is the wrong answer in
+the job whose entire purpose is to check the contract: a silent skip there
+would report success for a check that never ran, and this job is about to
+become a required status check. So CI sets this and the import becomes hard.
+"""
+
+
+def _import_or_fail(module: str, package: str) -> Any:
+    required = os.environ.get(REQUIRE_ENV) == "1"
+    try:
+        return importlib.import_module(module)
+    except ImportError:
+        if required:
+            pytest.fail(
+                f"{package} is not installed and {REQUIRE_ENV}=1, so this contract check "
+                "cannot run. The job that sets it must install the suite before running these "
+                "tests; a skip here would report success for a check that never happened."
+            )
+        # allow_module_level: this runs during collection, not inside a test.
+        pytest.skip(
+            f"{package} is not installed; set {REQUIRE_ENV}=1 to make this a failure instead.",
+            allow_module_level=True,
+        )
+
+
+suite_reader = _import_or_fail("ai_infrastructure_suite.re_embed_record", "ai-infrastructure-suite")
+jsonschema = _import_or_fail("jsonschema", "jsonschema")
 
 
 def _suite_schema() -> dict[str, Any]:
