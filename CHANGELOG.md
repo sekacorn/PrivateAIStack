@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Changed behavior
+
+- **`privateaistack reembed quality --anchor-seed` no longer produces a
+  score-moving result.** The anchor seed is now derived as `sha256` over the
+  source and target store digests, and supplying `--anchor-seed` overrides that
+  derivation. An overridden seed marks the anchor set as `anchor_selection:
+  operator`: the comparison still runs, and its label, metrics and threshold
+  checks are all reported in full, but the result can never move a lock-in
+  score from 50 to 25, and no seed is written into the re-embed record.
+
+  The anchors drawn are identical either way. Only the provenance differs, and
+  the provenance is the point: an operator who can choose the seed can draw
+  query set after query set until the numbers clear the declared threshold and
+  then publish the one that passed. A derived seed is a function of content the
+  record already commits to, so nobody can steer it and a third party can
+  recompute the same set from the record alone.
+
+  Omit the flag to get a derived seed and a `seeded_random` set. The AI
+  Infrastructure Suite derives the same value independently and reads any other
+  seed as operator-chosen, so the two must agree; a cross-repo test asserts
+  that they do.
+
 ## 0.2.0b1 - 2026-08-12
 
 ### First Beta candidate
