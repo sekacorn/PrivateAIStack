@@ -2,12 +2,53 @@
 
 ## Unreleased
 
+## 0.2.0b2 - 2026-11-24
+
 ### Re-embedding
 
-No published version contains the `reembed` command group: every item here is
-new to anyone upgrading from `0.2.0b1`. The note below is written as a change
-because it *is* one relative to the development branch, where `--anchor-seed`
-previously produced a score-moving result.
+New in this release: `private_ai_stack.reembed` and the `privateaistack
+reembed` command group. No earlier published version contains either, so every
+item here is new to anyone upgrading from `0.2.0b1`.
+
+**Reading the records it writes requires ai-infrastructure-suite 0.1.0b3 or
+later.** This is a compatibility statement, not a dependency: this package does
+not depend on the suite.
+
+- **`privateaistack reembed run`** rebuilds an `embedding-portability.v1`
+  store with a different model, from the store's retained source text. It
+  writes the rebuilt store as an ordinary `embedding-portability.v1` document,
+  so `ai-suite exit-report` scores it with no new code, and a
+  `re-embed-record.v1` describing what was rebuilt, what was skipped, how it
+  was batched and what left the machine.
+- **Resumable batches.** A batch's shard reaches disk before the checkpoint
+  claims it, so a crash can leave an unclaimed shard but never a claim without
+  its shard. A changed claimed shard is an error, and a checkpoint written for
+  a different input, target, model or batch size is refused. Tests interrupt a
+  run at every point it can be interrupted and compare the result byte for
+  byte with an uninterrupted run. One batch is held in memory at a time;
+  the default is 64 records.
+- **`availability` has no default.** It is an operator attestation that no
+  offline check can confirm.
+- **`--estimate-only`** embeds a small calibration sample and extrapolates to
+  a `re-embed-estimate.v1` document, labelling which parts are exact,
+  measured and extrapolated. It writes no shard, checkpoint or store. Sample
+  records are chosen by a recorded seed rather than by identifier.
+- **Cost in money comes from AIMeter or not at all**, through the new `[cost]`
+  extra (`aimeter-oss>=0.2.0b1,<0.3.0`, the same range as the suite).
+- **`privateaistack reembed quality`** compares retrieval before and after a
+  rebuild and adds a `quality` block to the record. It measures neighborhood
+  agreement, not search quality. Thresholds are declared by the operator and
+  always shown; with no agreement floor declared the status is `unjudged`, a
+  result with metrics and no verdict. `reembed run` writes no quality block
+  at all.
+- **An egress gate, default-deny for anything but built-in code.** An injected
+  executor needs `allow_external`; hosted execution also needs
+  `allow_hosted`, an HTTPS endpoint and a `public` or `internal` data
+  classification, and is refused for `unknown`, `confidential` and
+  `restricted` data. The refusal happens before the evidence document is
+  opened. Every run records an egress block, including what was submitted to
+  an external executor; submission is recorded, delivery stays `unverified`.
+  No hosted provider ships in this package.
 
 - **`privateaistack reembed quality --anchor-seed` marks the anchor set
   operator-chosen and never moves a lock-in score.** The seed is derived as
@@ -28,6 +69,13 @@ previously produced a score-moving result.
   Infrastructure Suite derives the same value independently and reads any other
   seed as operator-chosen, so the two must agree; a cross-repo test asserts
   that they do.
+
+### Release process
+
+- The release workflow gained a `dry_run` input (default `true`) on
+  `workflow_dispatch`, a verify job that runs lint, type check, Bandit and
+  tests before the build, and a `v[0-9]*` tag trigger. The publish job now
+  waits for a required reviewer at the `pypi` environment.
 
 ### Dependencies
 
