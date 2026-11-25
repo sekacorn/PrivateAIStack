@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+- **Knowledge search no longer hides vectors of a different dimension.**
+  `cosine_similarity` returned `0.0` when the query vector and a stored
+  vector had different lengths, so a store built at another embedding
+  dimension (or holding two) ranked every such chunk last **without any
+  error**. **Affects every published version, 0.1.0a1 through 0.2.0b3.** It
+  now raises `EmbeddingDimensionError` (a `ValueError`), and
+  `POST /v1/knowledge/search` answers `409 knowledge_index_inconsistent`
+  instead of returning wrong results. The response names no stored text.
+
 ## 0.2.0b3 - 2026-11-24
 
 A security release. **If your `OLLAMA_BASE_URL` or OTel endpoint ever
