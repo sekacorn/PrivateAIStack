@@ -1,6 +1,6 @@
 # Trust Boundaries
 
-Status: `0.2.0b3` Beta candidate trust-boundary documentation.
+Status: `0.2.0b4` Beta candidate trust-boundary documentation.
 
 ```text
 User or CI

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.0b4 - 2026-11-25
+
+A bug-fix release. Knowledge search over vectors of a different dimension now
+fails with an explicit `409` instead of silently ranking those chunks last.
+
 ### Fixed
 - **Knowledge search no longer hides vectors of a different dimension.**
   `cosine_similarity` returned `0.0` when the query vector and a stored
