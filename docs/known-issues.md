@@ -6,7 +6,7 @@ to do in the meantime. Fixed issues move to the [changelog](../CHANGELOG.md).
 
 ## The default database URL contains a built-in password
 
-**Status:** open. Present in every published version through 0.2.0b3.
+**Status:** open. Present in every published version through 0.2.0b4.
 
 **What happens.** `database_url` defaults to a PostgreSQL DSN whose username
 and password are both `private_ai_stack`. That is the credential the bundled
@@ -26,7 +26,7 @@ stack.
 
 ## Request validation errors echo the submitted input
 
-**Status:** open. Present in every published version through 0.2.0b3.
+**Status:** open. Present in every published version through 0.2.0b4.
 
 **What happens.** When a request body fails validation, the API answers `422`
 with a `details.errors` list taken directly from the validator. Each entry
