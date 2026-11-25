@@ -1,6 +1,6 @@
 {
   "template": "privateaistack-deployment",
-  "version": "0.2.0b2",
+  "version": "0.2.0b3",
   "default_model": "qwen2.5:3b",
   "default_profile": "laptop-cpu",
   "ollama_image": "ollama/ollama:0.31.1",

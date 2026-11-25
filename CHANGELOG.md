@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.0b3 - 2026-11-24
+
+A security release. **If your `OLLAMA_BASE_URL` or OTel endpoint ever
+contained credentials or a query-string token, rotate them**: such a URL is
+now refused. Nothing else about the runtime changes.
+
 ### Security
 
 - **`ollama_base_url` and `otel_endpoint` refuse credentials, query strings
