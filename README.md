@@ -239,7 +239,7 @@ OLLAMA_MODEL=qwen2.5:3b
 OLLAMA_BASE_URL=http://ollama:11434
 ```
 
-For external Ollama, point `OLLAMA_BASE_URL` to your private endpoint. Hosted providers remain disabled unless explicitly configured in future adapters.
+For external Ollama, point `OLLAMA_BASE_URL` to your private endpoint. The URL must not contain credentials, a query string or a fragment; configure authentication outside it. Hosted providers remain disabled unless explicitly configured in future adapters.
 
 ## Current Limitations
 
