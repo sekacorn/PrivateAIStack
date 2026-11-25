@@ -23,7 +23,15 @@ class DeterministicEmbeddingModel:
         return [value / norm for value in values]
 
 
+class EmbeddingDimensionError(ValueError):
+    """Two vectors of different dimensions cannot be compared.
+
+    Returning a score for them (the old behaviour returned 0.0) silently ranks a
+    whole store below every match, which hides a misconfigured or mixed index.
+    """
+
+
 def cosine_similarity(left: list[float], right: list[float]) -> float:
     if len(left) != len(right):
-        return 0.0
+        raise EmbeddingDimensionError(f"Cannot compare a {len(left)}-dimension vector with a {len(right)}-dimension vector.")
     return sum(a * b for a, b in zip(left, right, strict=True))

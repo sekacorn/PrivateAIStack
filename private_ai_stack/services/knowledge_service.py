@@ -7,6 +7,7 @@ from private_ai_stack.api.schemas import (
     KnowledgeSearchResponse,
 )
 from private_ai_stack.audit.writer import AuditWriter
+from private_ai_stack.memory.embeddings import EmbeddingDimensionError
 from private_ai_stack.memory.store import MemoryStore, PersistenceUnavailable
 
 
@@ -40,6 +41,13 @@ class KnowledgeService:
             results = await self.memory.search(payload.query, payload.limit)
         except PersistenceUnavailable as exc:
             raise AppError("persistence_unavailable", "Configured knowledge persistence is unavailable.", 503) from exc
+        except EmbeddingDimensionError as exc:
+            raise AppError(
+                "knowledge_index_inconsistent",
+                "Stored knowledge vectors and the configured embedding dimension differ. "
+                "Restore the configured dimension or rebuild the index; search results would be wrong.",
+                409,
+            ) from exc
         hits = [
             KnowledgeHit(
                 document_id=chunk.document_id,
