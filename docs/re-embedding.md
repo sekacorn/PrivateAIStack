@@ -349,6 +349,29 @@ needs `allow_hosted=True`, an HTTPS endpoint declaration, and a `public` or
 data are blocked from hosted execution even when both consent flags are true.
 The refusal occurs before the evidence document is opened.
 
+### "Local" here means loopback only, on purpose
+
+This gate is stricter than the rule the rest of the suite uses to classify an
+endpoint. AgentForge, ModelSwapBench and the AI Infrastructure Suite treat a
+private-network address (`10.x`, `192.168.x`, link-local) as **local**, because
+their question is whether a call leaves your own infrastructure. This gate asks
+a narrower question, whether **source text leaves this machine**, so:
+
+- a `local` external endpoint must be `localhost` or a loopback address;
+- a `hosted` external endpoint must use HTTPS and a public address;
+- a private-network address is therefore accepted as neither. An embedder on
+  another machine in your network is not on this machine, and this package
+  will not describe sending source text to it as local. It is also not a public
+  HTTPS endpoint, so it cannot be declared hosted.
+
+That gap is deliberate, not an oversight. If you need to re-embed against an
+embedder elsewhere on a private network, expose it on loopback (a tunnel or a
+local proxy you control) so the declaration matches what the record says.
+
+Two smaller differences follow from the same strictness. The recorded
+`endpoint_origin` drops a default port (`https://host`, not `https://host:443`),
+and a query string or fragment in the endpoint is refused, as credentials are.
+
 The CLI exposes the same preflight flags, but it does not ship an injected or
 hosted provider, so an allowed external CLI run stops before reading source
 data and explains that an injected embedder is required.

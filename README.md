@@ -261,6 +261,10 @@ For external Ollama, point `OLLAMA_BASE_URL` to your private endpoint. Hosted pr
 - More SARIF normalizers.
 - Optional hosted-provider adapters with explicit opt-in.
 
+## Known issues
+
+Understood problems that are not yet fixed are listed in `docs/known-issues.md`.
+
 ## License
 
 Original repository code is Apache-2.0 licensed. Third-party dependencies have their own licenses; see `docs/dependency-licenses.md`.
