@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Security
+
+- **`ollama_base_url` and `otel_endpoint` refuse credentials, query strings
+  and fragments. Affects every published version through 0.2.0b2.** A URL such
+  as `http://user:password@ollama:11434` or `http://ollama:11434?key=...` was
+  accepted and used. The HTTP client logs each request URL at INFO, and the
+  Ollama URL is passed on to Forge, so a secret placed there reached any log
+  that captured INFO output. Such a URL is now refused when the settings
+  load, with a message that never repeats it. Rejected settings are no longer
+  echoed in validation errors at all, which also covers a malformed
+  `database_url`. If you ran an earlier version with a secret in either URL
+  and INFO logging on, rotate it. No setting needs a query string, so none is
+  allowed.
+
 ## 0.2.0b2 - 2026-11-24
 
 ### Re-embedding
