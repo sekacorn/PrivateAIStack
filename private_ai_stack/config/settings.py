@@ -9,7 +9,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Runtime settings with explicit local-development and durability boundaries."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="forbid", populate_by_name=True)
+    # hide_input_in_errors: a rejected setting may be a URL or DSN carrying a
+    # password, and pydantic would otherwise copy the value into the error.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="forbid",
+        populate_by_name=True,
+        hide_input_in_errors=True,
+    )
 
     app_name: str = "PrivateAIStack"
     environment: str = Field(default="development", validation_alias="PRIVATE_AI_STACK_ENVIRONMENT")
@@ -104,7 +112,20 @@ class Settings(BaseSettings):
     def validate_http_url(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        parsed = urlparse(value)
+        # One rule for every configured URL: no credentials, no query string,
+        # no fragment. The HTTP client logs each request URL, and the Ollama
+        # URL is handed on to Forge. Messages never repeat the URL.
+        try:
+            parsed = urlparse(value)
+            has_credentials = parsed.username is not None or parsed.password is not None
+        except ValueError:
+            raise ValueError("must be an absolute HTTP(S) URL") from None
+        if has_credentials or "@" in parsed.netloc:
+            raise ValueError("must not contain credentials (user:password@host); configure authentication outside the URL")
+        if "?" in value:
+            raise ValueError("must not contain a query string")
+        if "#" in value:
+            raise ValueError("must not contain a fragment")
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("must be an absolute HTTP(S) URL")
         return value.rstrip("/")
