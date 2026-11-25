@@ -1,6 +1,6 @@
 # PrivateAIStack Threat Model
 
-Status: `0.2.0b2` Beta candidate threat model.
+Status: `0.2.0b3` Beta candidate threat model.
 
 PrivateAIStack provides application-level governance for local AI workflows. It is not VM-grade isolation, a container escape prevention system, or a substitute for professional security review.
 

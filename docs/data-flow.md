@@ -1,6 +1,6 @@
 # Data Flow
 
-Status: `0.2.0b2` Beta candidate data-flow documentation.
+Status: `0.2.0b3` Beta candidate data-flow documentation.
 
 ## Agent Task Flow
 

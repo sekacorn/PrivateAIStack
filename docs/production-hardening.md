@@ -1,6 +1,6 @@
 # Production Hardening
 
-PrivateAIStack `0.2.0b2` is a Beta candidate and is not production-hardened by default.
+PrivateAIStack `0.2.0b3` is a Beta candidate and is not production-hardened by default.
 
 Before production use:
 
