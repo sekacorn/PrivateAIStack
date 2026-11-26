@@ -27,15 +27,15 @@ then stops before the upload. **A pushed version tag is always a real
 release**, so rehearse first against an existing tag:
 
 ```bash
-gh workflow run release.yml --repo sekacorn/PrivateAIStack -f tag=v0.2.0b3
+gh workflow run release.yml --repo sekacorn/PrivateAIStack -f tag=v0.2.0b4
 ```
 
 Then tag the verified commit and push the tag by explicit refspec, never with
 `--tags`:
 
 ```bash
-git tag -a v0.2.0b4 <verified-commit> -m "privateaistack 0.2.0b4"
-git push origin refs/tags/v0.2.0b4:refs/tags/v0.2.0b4
+git tag -a v0.2.0b5 <verified-commit> -m "privateaistack 0.2.0b5"
+git push origin refs/tags/v0.2.0b5:refs/tags/v0.2.0b5
 ```
 
 The publish job waits at the `pypi` environment for a required reviewer to
