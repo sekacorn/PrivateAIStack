@@ -14,6 +14,12 @@ Status: Beta candidate `0.2.0b5`. This candidate is not a claim of production ha
 - Reviews local repositories in `safe-static` mode.
 - Produces Markdown, JSON, and SARIF-style review reports.
 - Records portable JSONL audit events.
+- Exports the knowledge store as `agent-memory.v1` (`privateaistack memory export`), with every
+  chunk bound to its vector, for the AI Infrastructure Suite's `memory` vector. A chunk that
+  looks like a credential stops the export; redact or exclude it, and the decision is audited.
+- Rebuilds a vector store with a different built-in embedding model (`privateaistack reembed run`)
+  and compares the two by **neighborhood agreement** (`reembed quality`). That metric is not a
+  measure of search quality; the thresholds are yours. See [docs/re-embedding.md](docs/re-embedding.md).
 - Optionally sends traces through the OpenTelemetry Collector to Jaeger.
 - Supports public-sector evaluation needs such as local operation, auditability, human oversight, accessibility, portability, and measurable mission outcomes.
 
@@ -201,6 +207,7 @@ make backup
 make restore RESTORE_FILE=backups/file.sql
 make export-memory
 make export-audit
+privateaistack memory export exports/memory   # agent-memory.v1, inside the api container
 privateaistack backup --directory .
 privateaistack restore --directory . backups/file.sql
 privateaistack audit export --directory .
@@ -260,6 +267,18 @@ For external Ollama, point `OLLAMA_BASE_URL` to your private endpoint. The URL m
 - Hardened sandboxed-execution mode.
 - More SARIF normalizers.
 - Optional hosted-provider adapters with explicit opt-in.
+
+## Security
+
+Hosted providers are off by default, PostgreSQL is not published to the host, configured URLs
+refuse credentials and query-string tokens, and an inconsistent knowledge index fails loudly
+instead of ranking wrongly. See [SECURITY.md](SECURITY.md).
+
+| Advisory | Affected | Fixed in |
+|---|---|---|
+| [GHSA-mhfj-hqw5-84h5](https://github.com/sekacorn/PrivateAIStack/security/advisories/GHSA-mhfj-hqw5-84h5): URL settings accepted credentials and query-string tokens that could reach INFO logs | `<= 0.2.0b2` | `0.2.0b3` |
+
+All advisories: [github.com/sekacorn/PrivateAIStack/security/advisories](https://github.com/sekacorn/PrivateAIStack/security/advisories).
 
 ## Known issues
 

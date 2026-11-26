@@ -1,6 +1,14 @@
 # Security Policy
 
-Use GitHub Security Advisories if enabled, or contact the maintainer through the repository before sharing sensitive vulnerability details.
+Use **Report a vulnerability** on the repository's [Security tab](https://github.com/sekacorn/PrivateAIStack/security) when it is available. If it is not, open an issue titled "Security contact request" that contains **no details**, and the maintainer will arrange a private channel.
+
+## Published advisories
+
+| Advisory | Affected | Fixed in |
+|---|---|---|
+| [GHSA-mhfj-hqw5-84h5](https://github.com/sekacorn/PrivateAIStack/security/advisories/GHSA-mhfj-hqw5-84h5): URL settings accepted credentials and query-string tokens that could reach INFO logs | `<= 0.2.0b2` | `0.2.0b3` |
+
+All advisories: [github.com/sekacorn/PrivateAIStack/security/advisories](https://github.com/sekacorn/PrivateAIStack/security/advisories).
 
 Do not open public issues for suspected vulnerabilities that include exploit details, credentials, private code, or sensitive operational information.
 
