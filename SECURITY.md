@@ -1,6 +1,9 @@
 # Security Policy
 
-Use **Report a vulnerability** on the repository's [Security tab](https://github.com/sekacorn/PrivateAIStack/security) when it is available. If it is not, open an issue titled "Security contact request" that contains **no details**, and the maintainer will arrange a private channel.
+Report a suspected vulnerability privately with **Report a vulnerability** on the repository's
+[Security tab](https://github.com/sekacorn/PrivateAIStack/security) (direct link: [github.com/sekacorn/PrivateAIStack/security/advisories/new](https://github.com/sekacorn/PrivateAIStack/security/advisories/new)).
+This is GitHub's private vulnerability reporting: the report stays private between you and the
+maintainers until an advisory is published.
 
 ## Published advisories
 
