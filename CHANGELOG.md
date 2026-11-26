@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.0b5 - 2026-11-25
+
+Portable memory. The knowledge store can be exported as `agent-memory.v1`,
+which the AI Infrastructure Suite verifies and scores; the old `export_jsonl`
+is superseded and no longer writes through a symbolic link. Requires
+`agentforge-oss` 0.5.9 or later.
+
 ### Added
 - **`agent-memory.v1` export of the knowledge store.**
   `private_ai_stack.memory.portable.export_agent_memory` and
