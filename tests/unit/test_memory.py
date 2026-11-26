@@ -27,7 +27,8 @@ async def test_memory_idempotent_ingestion_and_search(tmp_path) -> None:
     assert second[2] is True
     assert hits[0][0].source_name == "doc.md"
 
-    export = await store.export_jsonl(str(tmp_path / "memory.jsonl"))
+    with pytest.warns(DeprecationWarning, match="superseded"):
+        export = await store.export_jsonl(str(tmp_path / "memory.jsonl"))
     assert "memory.jsonl" in export
 
 

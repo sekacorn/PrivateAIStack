@@ -1,5 +1,8 @@
 import hashlib
 import json
+import os
+import stat
+import warnings
 from typing import Any
 
 from private_ai_stack.config.settings import Settings
@@ -192,6 +195,11 @@ class MemoryStore:
         scored = [(chunk, cosine_similarity(query_embedding, chunk.embedding)) for chunk in chunks]
         return sorted(scored, key=lambda item: (-item[1], item[0].chunk_id))[:limit]
 
+    async def all_chunks(self) -> list[DocumentChunk]:
+        """Every stored chunk, with its stored vector. Used by the ``agent-memory.v1`` exporter."""
+        await self._ensure_loaded()
+        return await self._all_chunks()
+
     async def _all_chunks(self) -> list[DocumentChunk]:
         if self._connection is None:
             return list(self._chunks)
@@ -219,8 +227,40 @@ class MemoryStore:
         ]
 
     async def export_jsonl(self, path: str) -> str:
+        """Write every chunk as one unversioned JSON line.
+
+        .. deprecated:: 0.2.0b5
+           Superseded by :func:`private_ai_stack.memory.portable.export_agent_memory`,
+           which writes the versioned ``agent-memory.v1`` format with digests, a
+           JSON Schema owned by the AI Infrastructure Suite, and a credential check.
+           Its output format is kept unchanged for existing callers.
+
+        Refuses to write through a symbolic link, or onto anything that is not
+        a regular file, so a planted link cannot redirect the export elsewhere.
+        Where the platform offers ``O_NOFOLLOW`` the open itself also refuses a
+        link, closing the gap between the check and the write.
+        """
+        warnings.warn(
+            "MemoryStore.export_jsonl is superseded by private_ai_stack.memory.portable.export_agent_memory "
+            "(agent-memory.v1). It still works and is kept for existing callers.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         chunks = sorted(await self._all_chunks(), key=lambda chunk: chunk.chunk_id)
-        with open(path, "w", encoding="utf-8") as handle:
+        try:
+            existing = os.lstat(path)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and not stat.S_ISREG(existing.st_mode):
+            raise ValueError("Refusing to export through a link or onto something that is not a regular file.")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags, 0o666)
+        except OSError as exc:
+            if os.path.islink(path):
+                raise ValueError("Refusing to export through a link or onto something that is not a regular file.") from exc
+            raise
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             for chunk in chunks:
                 handle.write(chunk.model_dump_json() + "\n")
         return path
