@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+### Added
+- **`agent-memory.v1` export of the knowledge store.**
+  `private_ai_stack.memory.portable.export_agent_memory` and
+  `privateaistack memory export OUT_DIR` write the store in the versioned format
+  the AI Infrastructure Suite reads and scores for the `memory` vector. Each
+  chunk becomes one item: `item_id` is the chunk ID, `content_sha256` covers its
+  exact text, and the document it came from (`document_id`, `source_name`,
+  `document_sha256`) is kept in metadata, with the operator's own metadata under
+  `metadata`. Items are written as digested JSONL shards.
+- The vectors go into a linked `embedding-portability.v1` document. They use the
+  scheme `privateaistack.hashed-bow.sha256-signed`, revision `1`, at the
+  configured dimension. Each vector is bound to its item by `content_sha256`,
+  and the exact text is retained.
+- **Before anything is written**, every stored vector is checked against the
+  store's own embedding of its chunk. An inconsistent index (another dimension,
+  or a changed value) stops the export and names the chunks.
+  `--no-embeddings` exports the text alone.
+- **A credential is never exported.** A chunk or metadata value that looks like
+  one stops the export. The error names the chunk and the kind, never the value.
+  There are two ways to proceed:
+  - `--redact-secrets` replaces each detected credential with
+    `[REDACTED:<kind>]`, records `redaction_profile: "secrets"`, and computes
+    the vectors over the redacted text.
+  - `--exclude CHUNK --exclude-reason "..."` leaves the chunk out. Each
+    exclusion is written to the audit log as `memory.export_exclusion` with the
+    export's digest. An exclusion without a reason or without an audit log is
+    refused.
+
+  The detector is AgentForge's, so both writers refuse the same things.
+- The export goes only into an empty, non-linked directory, and files are
+  created exclusively.
+- No tombstones are written: this store deletes replaced chunks without leaving
+  a marker, so every export reports `deleted_by_policy: 0`.
+- `MemoryStore.all_chunks()`: a public read of every chunk and its stored
+  vector.
+
+### Changed
+- **The `agentforge-oss` floor is now 0.5.9** (`>=0.5.9,<0.6.0`, in the core
+  requirement and in every extra). The export reuses
+  `forge.security.secrets`, which first shipped in 0.5.9.
+
+### Deprecated
+- `MemoryStore.export_jsonl` is superseded by `export_agent_memory`. It still
+  works unchanged, but now emits a `DeprecationWarning`. Its output has no
+  version field, no schema and no digests.
+
 ## 0.2.0b4 - 2026-11-25
 
 A bug-fix release. Knowledge search over vectors of a different dimension now

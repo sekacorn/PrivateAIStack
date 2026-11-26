@@ -28,6 +28,7 @@ privateaistack model pull --directory . --model qwen2.5:3b
 privateaistack task run --directory . "Summarize the operating plan."
 privateaistack knowledge add --directory . --content "Local document text"
 privateaistack knowledge search --directory . "local document"
+privateaistack memory export ./exports/memory
 privateaistack review --directory . /app/sample-target
 privateaistack audit show --directory .
 privateaistack audit export --directory .
@@ -39,6 +40,68 @@ privateaistack restore --directory . backups/private_ai_stack.sql
 The model commands operate inside the Docker Compose Ollama service by default. A model installed in a host Ollama service is not automatically present in the Compose named volume.
 
 Commands use subprocess argument arrays and do not interpolate shell strings.
+
+## `memory export`
+
+Writes the knowledge store as `agent-memory.v1`, the portable format the AI
+Infrastructure Suite reads and scores for the `memory` lock-in vector.
+
+```bash
+docker compose exec api privateaistack memory export /app/exports/memory-2026-11-25
+```
+
+It reads the store configured for the process it runs in (`DATABASE_URL` and the
+other settings, exactly as the API reads them). Run it where that database is
+reachable, which in the Compose deployment means inside the `api` container.
+The target must be a new or empty directory that is not a link.
+
+What it writes:
+
+```text
+agent-memory.json                       the document, with digests of everything below
+items/0000.jsonl ...                    one chunk per line
+embeddings/embedding-portability.json   the vectors, scheme privateaistack.hashed-bow.sha256-signed
+embeddings/vectors/0000.jsonl ...
+embeddings/sources/<sha256>.txt         each chunk's exact text
+```
+
+Each chunk is one item, and its `item_id` is the chunk ID. Its metadata holds
+`document_id`, `source_name` and `document_sha256`, with the document's own
+metadata under `metadata`. Vectors are bound to items by the SHA-256 of the
+exported text.
+
+The export is refused, with nothing written, when:
+
+- **A chunk looks like it holds a credential.** The error names the chunk and
+  the kind of credential, never the value. If it is a real credential, remove
+  the document from the store first. If it is a false positive, there are two
+  ways to proceed, and both are recorded:
+  - `--redact-secrets`: every detected credential becomes
+    `[REDACTED:<kind>]`. The document records `redaction_profile: "secrets"`,
+    and the vectors are computed over the redacted text.
+  - `--exclude CHUNK --exclude-reason "..."` (`--exclude` is repeatable): the
+    chunk is left out of this export but stays in the store. Each exclusion is
+    written to the audit log as `memory.export_exclusion` together with the
+    export's digest.
+
+  There is no option that exports a detected credential.
+- **A stored vector is not the store's embedding of its chunk**, for example
+  after a change of `EMBEDDING_DIMENSIONS`. Re-ingest those documents, or pass
+  `--no-embeddings` to export the text alone.
+- **The data is outside the format's bounds**: a chunk over 48 KiB, metadata
+  nested deeper than 8 levels, and similar limits.
+
+Other options: `--store-id`, `--export-id` and `--actor` (who is exporting,
+recorded in the audit log).
+
+The store keeps no deletion markers, so an export never carries tombstones. It
+cannot show that a document was deleted.
+
+`MemoryStore.export_jsonl` still exists but is superseded. Its output has no
+version, no schema and no digests.
+
+Exit codes: `0` success, `2` refused (invalid input), `1` runtime failure such
+as an unreachable database.
 
 ## `reembed`
 

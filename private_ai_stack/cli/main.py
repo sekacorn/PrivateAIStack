@@ -85,12 +85,14 @@ task_app = typer.Typer(help="Run agent tasks through the API.")
 knowledge_app = typer.Typer(help="Add and search local knowledge through the API.")
 audit_app = typer.Typer(help="Inspect and export local audit logs.")
 reembed_app = typer.Typer(help="Rebuild a vector store with a different embedding model.")
+memory_app = typer.Typer(help="Export the knowledge store in a portable, verifiable format.")
 app.add_typer(config_app, name="config")
 app.add_typer(model_app, name="model")
 app.add_typer(task_app, name="task")
 app.add_typer(knowledge_app, name="knowledge")
 app.add_typer(audit_app, name="audit")
 app.add_typer(reembed_app, name="reembed")
+app.add_typer(memory_app, name="memory")
 
 
 def version_callback(value: bool) -> None:
@@ -859,3 +861,65 @@ def reembed_quality(
 
 if __name__ == "__main__":
     main()
+
+
+@memory_app.command("export")
+def memory_export(
+    out_dir: Annotated[Path, typer.Argument(help="An empty or new directory to write the export into.")],
+    store_id: Annotated[str, typer.Option("--store-id", help="Identifier for the store in the export.")] = "knowledge",
+    export_id: Annotated[str | None, typer.Option("--export-id", help="Identifier for this export.")] = None,
+    redact_secrets: Annotated[bool, typer.Option("--redact-secrets", help="Replace detected credentials with [REDACTED:<kind>].")] = False,
+    exclude: Annotated[list[str] | None, typer.Option("--exclude", help="Leave this chunk out of the export (repeatable).")] = None,
+    exclude_reason: Annotated[str, typer.Option("--exclude-reason", help="Why the excluded chunks are left out (audited).")] = "",
+    no_embeddings: Annotated[bool, typer.Option("--no-embeddings", help="Export the text without vectors.")] = False,
+    actor: Annotated[str, typer.Option("--actor", help="Who is exporting, for the audit log.")] = "operator",
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show raw exceptions.")] = False,
+) -> None:
+    """Export the knowledge store as agent-memory.v1.
+
+    Reads the store configured for this process (DATABASE_URL and the other
+    settings, as the API reads them), so run it where the database is
+    reachable, for example inside the api container. A chunk that looks like a
+    credential stops the export; redact with --redact-secrets, or leave it out
+    with --exclude CHUNK --exclude-reason "...", which is recorded in the
+    audit log.
+    """
+    import asyncio
+
+    from private_ai_stack.config.settings import Settings
+    from private_ai_stack.memory.portable import export_agent_memory
+    from private_ai_stack.memory.store import MemoryStore
+
+    try:
+        if exclude and not exclude_reason.strip():
+            raise CliError("--exclude needs --exclude-reason.", INVALID_INPUT)
+        settings = Settings()
+        audit = AuditWriter(settings.audit_dir / "audit.jsonl", max_record_bytes=settings.max_audit_record_bytes) if exclude else None
+
+        async def run() -> Any:
+            store = MemoryStore(settings)
+            try:
+                return await export_agent_memory(
+                    store,
+                    out_dir,
+                    store_id=store_id,
+                    export_id=export_id,
+                    redact_secrets=redact_secrets,
+                    exclude=dict.fromkeys(exclude or [], exclude_reason),
+                    include_embeddings=not no_embeddings,
+                    audit=audit,
+                    actor=actor,
+                )
+            finally:
+                await store.close()
+
+        summary = asyncio.run(run())
+        typer.echo(
+            f"Exported {summary.items} chunk(s) to {summary.path} (sha256 {summary.sha256})"
+            + ("" if summary.embeddings else "; no vectors")
+            + (f"; excluded {len(summary.excluded)} (audited)" if summary.excluded else "")
+        )
+    except ValueError as exc:
+        handle_error(CliError(str(exc), INVALID_INPUT), verbose)
+    except Exception as exc:
+        handle_error(exc, verbose)
