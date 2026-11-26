@@ -43,10 +43,19 @@
   requirement and in every extra). The export reuses
   `forge.security.secrets`, which first shipped in 0.5.9.
 
+### Fixed
+- **`MemoryStore.export_jsonl` no longer writes through a symbolic link.**
+  **Affects every published version, 0.1.0a1 through 0.2.0b4.** Previously it
+  opened its output path with a plain `open(path, "w")`, so a link planted at
+  that path redirected the export, and truncated whatever the link pointed at.
+  It now raises `ValueError` when the path is a link or anything other than a
+  regular file, and on platforms with `O_NOFOLLOW` the open itself refuses a
+  link. Overwriting an existing regular file still works as before.
+
 ### Deprecated
-- `MemoryStore.export_jsonl` is superseded by `export_agent_memory`. It still
-  works unchanged, but now emits a `DeprecationWarning`. Its output has no
-  version field, no schema and no digests.
+- `MemoryStore.export_jsonl` is superseded by `export_agent_memory`. Its output
+  format is unchanged, but it now emits a `DeprecationWarning`. Its output has
+  no version field, no schema and no digests.
 
 ## 0.2.0b4 - 2026-11-25
 

@@ -383,3 +383,36 @@ def test_cli_refusal_is_invalid_input(tmp_path: Path, monkeypatch: pytest.Monkey
     assert result.exit_code == 2
     assert "does not hold: missing" in result.output
     assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.asyncio
+async def test_export_jsonl_refuses_a_link(tmp_path: Path) -> None:
+    store = await _store(tmp_path, ("alpha", "a.md", {}))
+    target = tmp_path / "elsewhere.txt"
+    target.write_text("untouched", encoding="utf-8")
+    link = tmp_path / "memory.jsonl"
+    try:
+        os.symlink(target, link)
+    except OSError:
+        pytest.skip("This platform does not allow creating a symlink here.")
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="link"):
+        await store.export_jsonl(str(link))
+    assert target.read_text(encoding="utf-8") == "untouched"
+
+
+@pytest.mark.asyncio
+async def test_export_jsonl_refuses_a_directory(tmp_path: Path) -> None:
+    store = await _store(tmp_path, ("alpha", "a.md", {}))
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="regular file"):
+        await store.export_jsonl(str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_export_jsonl_still_overwrites_a_regular_file(tmp_path: Path) -> None:
+    store = await _store(tmp_path, ("alpha", "a.md", {}))
+    path = tmp_path / "memory.jsonl"
+    path.write_text("old contents line\n" * 10, encoding="utf-8")
+    with pytest.warns(DeprecationWarning):
+        await store.export_jsonl(str(path))
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and json.loads(lines[0])["source_name"] == "a.md"
